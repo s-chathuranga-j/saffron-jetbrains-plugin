@@ -1,0 +1,127 @@
+{
+  "$schema": "https://raw.githubusercontent.com/martinring/tmlanguage/master/tmlanguage.json",
+  "name": "Saffron",
+  "scopeName": "source.saffron",
+  "patterns": [
+    {
+      "include": "#comment"
+    },
+    {
+      "include": "#tag"
+    },
+    {
+      "include": "#stepset-definition"
+    },
+    {
+      "include": "#block-keyword"
+    },
+    {
+      "include": "#stepset-invocation"
+    },
+    {
+      "include": "#step"
+    },
+    {
+      "include": "#docstring"
+    },
+    {
+      "include": "#table"
+    }
+  ],
+  "repository": {
+    "comment": {
+      "match": "^\\s*#.*$",
+      "name": "comment.line.number-sign.saffron"
+    },
+    "tag": {
+      "match": "@[^@\\s]+",
+      "name": "entity.name.tag.saffron"
+    },
+    "stepset-definition": {
+      "match": "^\\s*(StepSet)(:)\\s*(.*)$",
+      "captures": {
+        "1": {
+          "name": "keyword.control.stepset.saffron"
+        },
+        "2": {
+          "name": "punctuation.separator.saffron"
+        },
+        "3": {
+          "name": "entity.name.function.stepset.saffron"
+        }
+      }
+    },
+    "block-keyword": {
+      "match": "^\\s*(Feature|Background|Scenario Outline|Scenario Template|Scenario|Examples|Scenarios|Rule)(:)(.*)$",
+      "captures": {
+        "1": {
+          "name": "keyword.control.gherkin.saffron"
+        },
+        "2": {
+          "name": "punctuation.separator.saffron"
+        },
+        "3": {
+          "name": "entity.name.section.saffron"
+        }
+      }
+    },
+    "stepset-invocation": {
+      "match": "^\\s*(StepSet)\\s+([^:].*)$",
+      "captures": {
+        "1": {
+          "name": "keyword.control.stepset.saffron"
+        },
+        "2": {
+          "name": "entity.name.function.stepset.saffron"
+        }
+      }
+    },
+    "step": {
+      "match": "^\\s*(Given|When|Then|And|But|\\*)\\s(.*)$",
+      "captures": {
+        "1": {
+          "name": "keyword.other.step.saffron"
+        },
+        "2": {
+          "name": "string.unquoted.step-text.saffron",
+          "patterns": [
+            {
+              "match": "\"[^\"]*\"",
+              "name": "string.quoted.double.saffron"
+            },
+            {
+              "match": "<[^<>]+>",
+              "name": "variable.parameter.saffron"
+            }
+          ]
+        }
+      }
+    },
+    "docstring": {
+      "begin": "^\\s*\"\"\"",
+      "end": "^\\s*\"\"\"",
+      "name": "string.quoted.docstring.saffron"
+    },
+    "table": {
+      "match": "^\\s*\\|.*\\|\\s*$",
+      "name": "meta.table.saffron",
+      "captures": {
+        "0": {
+          "patterns": [
+            {
+              "match": "\\|",
+              "name": "punctuation.separator.table.saffron"
+            },
+            {
+              "match": "<[^<>]+>",
+              "name": "variable.parameter.saffron"
+            }
+          ]
+        }
+      }
+    }
+  },
+  "fileTypes": [
+    "saffron"
+  ]
+}

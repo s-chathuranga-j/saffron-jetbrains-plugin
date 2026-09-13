@@ -1,0 +1,15 @@
+<p><b>Saffron</b> language support for JetBrains IDEs — IntelliJ IDEA, WebStorm, PyCharm, Rider, and the rest, including Community editions.</p>
+
+<p>Saffron is a Gherkin-native end-to-end test runner: an AI agent records each scenario once, every later run replays at zero tokens. Its <code>.saffron</code> files are plain Gherkin plus the <code>StepSet:</code> keyword for reusable step groups.</p>
+
+<p>This plugin gives you, out of the box:</p>
+<ul>
+  <li><b>Syntax highlighting</b> for <code>.saffron</code> files — Gherkin keywords, <code>StepSet</code> definitions and invocations, tables, doc strings, parameters.</li>
+  <li><b>Completion with status badges</b> — every step the project knows, marked recorded (replays free), divergent, or unrecorded — so you reuse wordings instead of paying for near-duplicate recordings.</li>
+  <li><b>StepSet completion, go-to-definition and hover</b> — jump from an invocation to its definition, even across files.</li>
+  <li><b>Diagnostics</b> — unknown or duplicate set names, a set name missing the <code>StepSet</code> keyword, near-duplicate step wordings.</li>
+</ul>
+
+<p>Intelligence is served by <code>saffron lsp</code> from the <code>saffron-ai</code> npm package (<code>npm i -D saffron-ai</code> in your project) through the LSP4IJ plugin, which is installed alongside. Highlighting needs nothing else.</p>
+
+<p>Website and docs: <a href="https://saffron-ai.lovable.app">saffron-ai.lovable.app</a>. Issues: <a href="https://github.com/s-chathuranga-j/saffron-ai/issues">GitHub</a>.</p>

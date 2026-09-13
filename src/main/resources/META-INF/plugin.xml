@@ -1,0 +1,27 @@
+<idea-plugin>
+    <id>ai.saffron.jetbrains</id>
+    <name>Saffron</name>
+    <vendor email="genius.chathuranga@gmail.com" url="https://saffron-ai.lovable.app">Chathuranga Jayasinghe</vendor>
+
+    <depends>com.intellij.modules.platform</depends>
+    <depends>org.jetbrains.plugins.textmate</depends>
+    <depends>com.redhat.devtools.lsp4ij</depends>
+
+    <extensions defaultExtensionNs="com.intellij">
+        <!-- .saffron is a Saffron file: icon + registration; colors come from the
+             TextMate grammar below (the file type is TextMate-backed). -->
+        <fileType name="Saffron"
+                  language="saffron"
+                  fieldName="INSTANCE"
+                  implementationClass="ai.saffron.jetbrains.SaffronFileType"
+                  extensions="saffron"/>
+
+        <textmate.bundleProvider implementation="ai.saffron.jetbrains.SaffronTextMateBundleProvider"/>
+
+        <notificationGroup id="Saffron" displayType="BALLOON"/>
+        <postStartupActivity implementation="ai.saffron.jetbrains.SaffronStartupActivity"/>
+    </extensions>
+
+    <xi:include xmlns:xi="http://www.w3.org/2001/XInclude" href="/META-INF/saffron-lsp4ij.xml"
+                xpointer="xpointer(/idea-plugin/*)"/>
+</idea-plugin>

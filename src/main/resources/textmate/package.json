@@ -1,0 +1,31 @@
+{
+  "name": "saffron-textmate",
+  "displayName": "Saffron (TextMate bundle)",
+  "description": "Syntax highlighting for .saffron files \u2014 Gherkin plus StepSet. Import this folder in JetBrains: Settings \u2192 Editor \u2192 TextMate Bundles \u2192 +. Shipped inside the saffron-ai npm package.",
+  "version": "0.1.0",
+  "publisher": "saffron-ai",
+  "engines": {
+    "vscode": "^1.75.0"
+  },
+  "contributes": {
+    "languages": [
+      {
+        "id": "saffron",
+        "aliases": [
+          "Saffron"
+        ],
+        "extensions": [
+          ".saffron"
+        ],
+        "configuration": "./language-configuration.json"
+      }
+    ],
+    "grammars": [
+      {
+        "language": "saffron",
+        "scopeName": "source.saffron",
+        "path": "./syntaxes/saffron.tmLanguage.json"
+      }
+    ]
+  }
+}

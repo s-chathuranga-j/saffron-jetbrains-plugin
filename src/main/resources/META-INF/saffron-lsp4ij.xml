@@ -1,0 +1,19 @@
+<idea-plugin>
+    <extensions defaultExtensionNs="com.redhat.devtools.lsp4ij">
+        <server id="saffron"
+                name="Saffron Language Server"
+                icon="ai.saffron.jetbrains.SaffronIcons.FILE"
+                factoryClass="ai.saffron.jetbrains.SaffronLanguageServerFactory">
+            <description><![CDATA[
+            <p>Saffron's language server (<code>saffron lsp</code> from the <code>saffron-ai</code> npm package):
+            step completion with recorded/divergent/unrecorded badges, StepSet completion and go-to-definition,
+            hover cards, and diagnostics for <code>.saffron</code> and <code>.feature</code> files.</p>
+            <p>Needs <code>saffron-ai</code> installed in the project (<code>npm i -D saffron-ai</code>).</p>
+            ]]></description>
+        </server>
+
+        <fileNamePatternMapping patterns="*.saffron;*.feature"
+                                serverId="saffron"
+                                languageId="saffron"/>
+    </extensions>
+</idea-plugin>
