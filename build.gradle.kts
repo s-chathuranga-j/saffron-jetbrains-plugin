@@ -53,6 +53,8 @@ intellijPlatform {
     pluginVerification {
         ides {
             recommended()
+            // ./gradlew verifyPlugin -PlocalIde="/path/to/IntelliJ IDEA.app" checks the IDE you actually use.
+            providers.gradleProperty("localIde").orNull?.let { local(it) }
         }
     }
 }

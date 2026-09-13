@@ -19,7 +19,9 @@ class SaffronLanguageServer(project: Project) : OSProcessStreamConnectionProvide
         val command = if (local != null && Files.isExecutable(local)) {
             GeneralCommandLine(local.toString(), "lsp")
         } else {
-            GeneralCommandLine(if (SystemInfo.isWindows) "npx.cmd" else "npx", "saffron", "lsp")
+            // "saffron" alone would resolve an unrelated npm package; the binary
+            // lives in saffron-ai, so pin the package explicitly.
+            GeneralCommandLine(if (SystemInfo.isWindows) "npx.cmd" else "npx", "-y", "-p", "saffron-ai", "saffron", "lsp")
         }
         if (basePath != null) command.withWorkDirectory(basePath)
         commandLine = command
