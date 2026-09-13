@@ -1,5 +1,7 @@
 # Saffron for JetBrains IDEs
 
+[![Build](https://github.com/s-chathuranga-j/saffron-jetbrains-plugin/actions/workflows/build.yml/badge.svg)](https://github.com/s-chathuranga-j/saffron-jetbrains-plugin/actions/workflows/build.yml)
+
 Language support for [Saffron](https://saffron-ai.lovable.app) `.saffron` files in IntelliJ IDEA, WebStorm, PyCharm, Rider and other JetBrains IDEs (2024.2+, Community editions included).
 
 - **Highlighting** for `.saffron` (Gherkin + `StepSet`): bundled TextMate grammar, no setup.
@@ -21,6 +23,10 @@ JETBRAINS_MARKETPLACE_TOKEN=... ./gradlew publishPlugin
 ```
 
 The grammar under `src/main/resources/textmate/` is the same one shipped in `saffron-vscode` and in the `saffron-ai` package (`textmate/saffron/`); keep the three in sync when it changes.
+
+## Source and issues
+
+Source: https://github.com/s-chathuranga-j/saffron-jetbrains-plugin. Bug reports and questions: https://github.com/s-chathuranga-j/saffron-ai/issues (the shared Saffron tracker).
 
 ## License
 
