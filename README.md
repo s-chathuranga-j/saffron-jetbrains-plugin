@@ -2,8 +2,8 @@
 
 Language support for [Saffron](https://saffron-ai.lovable.app) `.saffron` files in IntelliJ IDEA, WebStorm, PyCharm, Rider and other JetBrains IDEs (2024.2+, Community editions included).
 
-- **Highlighting** for `.saffron` (Gherkin + `StepSet`) — bundled TextMate grammar, no setup.
-- **Completion, go-to-definition, hover, diagnostics** for `.saffron` and `.feature` — served by `saffron lsp` from the `saffron-ai` npm package, wired through [LSP4IJ](https://plugins.jetbrains.com/plugin/23257-lsp4ij) automatically.
+- **Highlighting** for `.saffron` (Gherkin + `StepSet`): bundled TextMate grammar, no setup.
+- **Completion, go-to-definition, hover, diagnostics** for `.saffron` and `.feature`. Served by `saffron lsp` from the `saffron-ai` npm package, wired through [LSP4IJ](https://plugins.jetbrains.com/plugin/23257-lsp4ij) automatically.
 
 ## Use
 
@@ -24,4 +24,4 @@ The grammar under `src/main/resources/textmate/` is the same one shipped in `saf
 
 ## License
 
-Saffron Free Use License v1.0 — see [LICENSE](LICENSE).
+Saffron Free Use License v1.0. See [LICENSE](LICENSE).
