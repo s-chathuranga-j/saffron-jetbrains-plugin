@@ -19,10 +19,12 @@ repositories {
 }
 
 dependencies {
+    testImplementation("junit:junit:4.13.2")
     intellijPlatform {
         create(providers.gradleProperty("platformType"), providers.gradleProperty("platformVersion"))
         bundledPlugin("org.jetbrains.plugins.textmate")
         plugins(providers.gradleProperty("lsp4ijVersion").map { listOf("com.redhat.devtools.lsp4ij:$it") })
+        testFramework(org.jetbrains.intellij.platform.gradle.TestFrameworkType.Platform)
     }
 }
 
@@ -52,5 +54,13 @@ intellijPlatform {
         ides {
             recommended()
         }
+    }
+}
+
+tasks {
+    runIde {
+        // Dev sandbox only: skip the trust/first-run dialogs so a project
+        // path passed via --args opens straight away.
+        jvmArgs("-Didea.trust.all.projects=true", "-Didea.initially.ask.config=never")
     }
 }
