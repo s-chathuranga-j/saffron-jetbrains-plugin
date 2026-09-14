@@ -72,30 +72,41 @@
           "name": "keyword.control.stepset.saffron"
         },
         "2": {
-          "name": "entity.name.function.stepset.saffron"
-        }
-      }
-    },
-    "step": {
-      "match": "^\\s*(Given|When|Then|And|But|\\*)\\s(.*)$",
-      "captures": {
-        "1": {
-          "name": "keyword.other.step.saffron"
-        },
-        "2": {
-          "name": "string.unquoted.step-text.saffron",
+          "name": "entity.name.function.stepset.saffron",
           "patterns": [
             {
-              "match": "\"[^\"]*\"",
-              "name": "string.quoted.double.saffron"
+              "include": "#argument"
             },
             {
-              "match": "<[^<>]+>",
-              "name": "variable.parameter.saffron"
+              "include": "#placeholder"
+            },
+            {
+              "include": "#token"
             }
           ]
         }
       }
+    },
+    "step": {
+      "begin": "^\\s*(Given|When|Then|And|But|\\*)\\b",
+      "beginCaptures": {
+        "1": {
+          "name": "keyword.other.step.saffron"
+        }
+      },
+      "end": "$",
+      "name": "meta.step.saffron",
+      "patterns": [
+        {
+          "include": "#argument"
+        },
+        {
+          "include": "#placeholder"
+        },
+        {
+          "include": "#token"
+        }
+      ]
     },
     "docstring": {
       "begin": "^\\s*\"\"\"",
@@ -103,22 +114,33 @@
       "name": "string.quoted.docstring.saffron"
     },
     "table": {
-      "match": "^\\s*\\|.*\\|\\s*$",
+      "begin": "^\\s*(?=\\|)",
+      "end": "$",
       "name": "meta.table.saffron",
-      "captures": {
-        "0": {
-          "patterns": [
-            {
-              "match": "\\|",
-              "name": "punctuation.separator.table.saffron"
-            },
-            {
-              "match": "<[^<>]+>",
-              "name": "variable.parameter.saffron"
-            }
-          ]
+      "patterns": [
+        {
+          "match": "\\|",
+          "name": "punctuation.separator.table.saffron"
+        },
+        {
+          "include": "#placeholder"
+        },
+        {
+          "include": "#token"
         }
-      }
+      ]
+    },
+    "argument": {
+      "match": "\"[^\"]*\"",
+      "name": "string.quoted.double.argument.saffron"
+    },
+    "placeholder": {
+      "match": "<[^<>\\s]+>",
+      "name": "variable.parameter.placeholder.saffron"
+    },
+    "token": {
+      "match": "\\{(env:[A-Za-z_][A-Za-z0-9_]*|date(?:[+-]\\d+)?(?::[^}]+)?)\\}",
+      "name": "constant.other.token.saffron"
     }
   },
   "fileTypes": [
