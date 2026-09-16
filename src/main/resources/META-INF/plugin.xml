@@ -4,6 +4,7 @@
     <vendor email="genius.chathuranga@gmail.com" url="https://saffron-ai.lovable.app">Chathuranga Jayasinghe</vendor>
 
     <depends>com.intellij.modules.platform</depends>
+    <depends>com.intellij.modules.lang</depends>
     <depends>org.jetbrains.plugins.textmate</depends>
     <depends>com.redhat.devtools.lsp4ij</depends>
 
@@ -17,6 +18,15 @@
                   extensions="saffron"/>
 
         <textmate.bundleProvider implementation="ai.saffron.jetbrains.SaffronTextMateBundleProvider"/>
+
+        <!-- Run/Debug Configurations → Add New Configuration → Saffron; right-click a
+             .saffron file or a folder of them → Run. -->
+        <configurationType implementation="ai.saffron.jetbrains.run.SaffronConfigurationType"/>
+        <runConfigurationProducer implementation="ai.saffron.jetbrains.run.SaffronRunConfigurationProducer"/>
+
+        <!-- The Saffron tool window: feature files, run buttons, last-run totals. -->
+        <toolWindow id="Saffron" anchor="right" icon="ai.saffron.jetbrains.SaffronIcons.TOOL_WINDOW"
+                    factoryClass="ai.saffron.jetbrains.ui.SaffronToolWindowFactory"/>
 
         <notificationGroup id="Saffron" displayType="BALLOON"/>
         <postStartupActivity implementation="ai.saffron.jetbrains.SaffronStartupActivity"/>

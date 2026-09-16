@@ -6,6 +6,8 @@ Language support for [Saffron](https://saffron-ai.lovable.app) `.saffron` files 
 
 - **Highlighting** for `.saffron` (Gherkin + `StepSet`): bundled TextMate grammar, no setup.
 - **Completion, go-to-definition, hover, diagnostics** for `.saffron` and `.feature`. Served by `saffron lsp` from the `saffron-ai` npm package, wired through [LSP4IJ](https://plugins.jetbrains.com/plugin/23257-lsp4ij) automatically.
+- **Run configurations**: Run/Debug Configurations → Add New Configuration → **Saffron** (`run` with files, folders, tags, replay-only, headed, re-record and extra arguments; `report`; `accept`). Right-click a `.saffron` file or a folder of them → **Run**. Output in the Run tool window.
+- **Saffron tool window** (right side): feature files with scenario counts, search, tick and Run Selected, Run All, Open Report, Accept All Proposals, last-run totals, pending proposals. Double-click opens a file.
 
 ## Use
 
