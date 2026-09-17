@@ -8,11 +8,9 @@ import com.intellij.openapi.actionSystem.ActionManager
 import com.intellij.openapi.actionSystem.AnAction
 import com.intellij.openapi.actionSystem.AnActionEvent
 import com.intellij.openapi.actionSystem.DefaultActionGroup
-import com.intellij.openapi.fileEditor.FileEditorManager
 import com.intellij.openapi.project.DumbAwareAction
 import com.intellij.openapi.project.Project
 import com.intellij.openapi.ui.SimpleToolWindowPanel
-import com.intellij.openapi.vfs.LocalFileSystem
 import com.intellij.ui.CheckBoxList
 import com.intellij.ui.components.JBCheckBox
 import com.intellij.ui.components.JBLabel
@@ -204,61 +202,6 @@ class TagsTab(project: Project, parent: Disposable) : StatusTab(project, parent)
             it.replayOnly = replayOnly.isSelected
             it.headed = headed.isSelected
         }
-    }
-}
-
-/** Vocabulary health and the effective configuration. */
-class HealthTab(project: Project, parent: Disposable) : StatusTab(project, parent) {
-
-    private val text = JBTextArea().apply {
-        isEditable = false
-        lineWrap = true
-        wrapStyleWord = true
-        border = JBUI.Borders.empty(6)
-        font = UIUtil.getLabelFont()
-    }
-
-    init {
-        toolbar = toolbar(
-            action("Open saffron.config.json", "Edit the configuration file", AllIcons.Actions.Edit) { openConfig() },
-            action("Refresh", "Reload the status", AllIcons.Actions.Refresh) { refreshStatus() },
-        )
-        setContent(JPanel(BorderLayout()).apply {
-            add(note, BorderLayout.NORTH)
-            add(JBScrollPane(text), BorderLayout.CENTER)
-        })
-        start()
-    }
-
-    override fun render(status: ProjectStatus?) {
-        if (status == null) {
-            text.text = ""
-            return
-        }
-        val v = status.vocabulary
-        val b = StringBuilder()
-        b.append("VOCABULARY\n")
-        b.append("${v.steps} steps: ${v.recorded} recorded, ${v.unrecorded} unrecorded · ${v.stepSets} step sets\n\n")
-        b.append("Divergent steps (same text, different recordings): ${v.divergent.size}\n")
-        for (d in v.divergent) b.append("  ● ").append(d).append('\n')
-        b.append("\nNear-duplicate wordings (probably the same step): ${v.nearDuplicates.size}\n")
-        for (n in v.nearDuplicates) b.append("  ~ \"").append(n.a).append("\"  vs  \"").append(n.b).append("\"  (").append((n.similarity * 100).toInt()).append("%)\n")
-        if (v.divergent.isNotEmpty() || v.nearDuplicates.isNotEmpty()) {
-            b.append("\nEach duplicate wording is a recording paid twice. Rename to the recorded wording, or re-record once and accept the rename edit.\n")
-        }
-        b.append("\nCONFIG  (").append(status.config.file ?: "no saffron.config.json, defaults").append(")\n")
-        for ((k, value) in status.config.effective.entrySet()) {
-            b.append("  ").append(k).append(" = ").append(if (value.isJsonPrimitive) value.asString else value.toString()).append('\n')
-        }
-        b.append("\nRUNNER  saffron-ai ").append(status.version).append(if (status.packageInstalled) " (project install)" else " (npx)").append('\n')
-        text.text = b.toString()
-        text.caretPosition = 0
-    }
-
-    private fun openConfig() {
-        val base = project.basePath ?: return
-        val vf = LocalFileSystem.getInstance().refreshAndFindFileByPath("$base/saffron.config.json")
-        if (vf != null) FileEditorManager.getInstance(project).openFile(vf, true) else note.text = "No saffron.config.json yet: run npx saffron init."
     }
 }
 

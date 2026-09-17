@@ -71,7 +71,7 @@ class StatusLastRun(val startedAt: String = "", val finishedAt: String = "", val
 
 class StatusHistoryRun(val startedAt: String = "", val green: Int = 0, val yellow: Int = 0, val red: Int = 0, val aiCalls: Int = 0, val costUsd: Double = 0.0)
 
-class NearDuplicate(val a: String = "", val b: String = "", val similarity: Double = 0.0)
+class DuplicateWording(val steps: List<String> = emptyList(), val actions: String = "")
 
 class StatusVocabulary(
     val steps: Int = 0,
@@ -79,7 +79,7 @@ class StatusVocabulary(
     val unrecorded: Int = 0,
     val stepSets: Int = 0,
     val divergent: List<String> = emptyList(),
-    val nearDuplicates: List<NearDuplicate> = emptyList(),
+    val duplicateWordings: List<DuplicateWording> = emptyList(),
 )
 
 class StatusConfig(val file: String? = null, val effective: JsonObject = JsonObject())

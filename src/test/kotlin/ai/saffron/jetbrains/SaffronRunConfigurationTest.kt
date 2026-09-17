@@ -135,7 +135,7 @@ class SaffronRunConfigurationTest : BasePlatformTestCase() {
           "proposals":[{"file":".saffron/proposals/login-saffron/login-errors.json","feature":"features/login.saffron","scenario":"Login errors","mode":"record","createdAt":"t","verified":true,"adaptations":[],"narrative":"n","aiCalls":5,"costUsd":1.5}],
           "lastRun":{"startedAt":"a","finishedAt":"b","totals":{"scenarios":1,"green":1,"yellow":0,"red":0,"aiCalls":0,"costUsd":0,"plan":{"subscriptionType":"max","fiveHourBefore":18,"fiveHourAfter":20}},"reportHtml":".saffron/reports/latest.html"},
           "history":[{"startedAt":"a","green":1,"yellow":0,"red":0,"aiCalls":0,"costUsd":0}],
-          "vocabulary":{"steps":3,"recorded":2,"unrecorded":1,"stepSets":1,"divergent":["x"],"nearDuplicates":[{"a":"p","b":"q","similarity":0.75}]}}"""
+          "vocabulary":{"steps":3,"recorded":2,"unrecorded":1,"stepSets":1,"divergent":["x"],"duplicateWordings":[{"steps":["p","q"],"actions":"goto /"}]}}"""
         val s = Gson().fromJson(json, ProjectStatus::class.java)
         assertEquals("0.5.4", s.version)
         assertEquals("Login", s.features[0].name)
@@ -145,7 +145,7 @@ class SaffronRunConfigurationTest : BasePlatformTestCase() {
         assertEquals(true, s.proposals[0].verified)
         assertEquals(20.0, s.lastRun!!.totals.plan!!.fiveHourAfter)
         assertEquals("x", s.vocabulary.divergent[0])
-        assertEquals(0.75, s.vocabulary.nearDuplicates[0].similarity)
+        assertEquals(listOf("p", "q"), s.vocabulary.duplicateWordings[0].steps)
         assertEquals("http://x", s.config.effective.get("baseURL").asString)
     }
 }
