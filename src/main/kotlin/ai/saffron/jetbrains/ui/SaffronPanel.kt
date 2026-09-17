@@ -171,6 +171,7 @@ class SaffronPanel(private val project: Project, parent: Disposable) : SimpleToo
     }
 
     private fun refresh() {
+        SaffronStatusService.getInstance(project).refresh()
         val base = project.basePath ?: return
         ApplicationManager.getApplication().executeOnPooledThread {
             val scanned = runCatching { SaffronProjectScan.scan(base) }.getOrNull() ?: return@executeOnPooledThread

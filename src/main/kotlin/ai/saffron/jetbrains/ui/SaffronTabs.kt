@@ -1,0 +1,302 @@
+package ai.saffron.jetbrains.ui
+
+import ai.saffron.jetbrains.run.SaffronRunner
+import com.intellij.icons.AllIcons
+import com.intellij.ide.BrowserUtil
+import com.intellij.openapi.Disposable
+import com.intellij.openapi.actionSystem.ActionManager
+import com.intellij.openapi.actionSystem.AnAction
+import com.intellij.openapi.actionSystem.AnActionEvent
+import com.intellij.openapi.actionSystem.DefaultActionGroup
+import com.intellij.openapi.fileEditor.FileEditorManager
+import com.intellij.openapi.project.DumbAwareAction
+import com.intellij.openapi.project.Project
+import com.intellij.openapi.ui.SimpleToolWindowPanel
+import com.intellij.openapi.vfs.LocalFileSystem
+import com.intellij.ui.CheckBoxList
+import com.intellij.ui.components.JBCheckBox
+import com.intellij.ui.components.JBLabel
+import com.intellij.ui.components.JBScrollPane
+import com.intellij.ui.components.JBTextArea
+import com.intellij.ui.jcef.JBCefApp
+import com.intellij.ui.jcef.JBCefBrowser
+import com.intellij.util.ui.JBUI
+import com.intellij.util.ui.UIUtil
+import java.awt.BorderLayout
+import java.nio.file.Files
+import java.nio.file.Path
+import javax.swing.BoxLayout
+import javax.swing.Icon
+import javax.swing.JPanel
+import javax.swing.JSplitPane
+
+/** Shared scaffolding for the status-driven tabs. */
+abstract class StatusTab(protected val project: Project, parent: Disposable) : SimpleToolWindowPanel(true, true) {
+
+    protected val note = JBLabel().apply { foreground = UIUtil.getContextHelpForeground(); border = JBUI.Borders.empty(4, 8) }
+
+    init {
+        project.messageBus.connect(parent).subscribe(SaffronStatusService.TOPIC, StatusListener { load -> onStatus(load) })
+    }
+
+    /** Called after the UI is built; applies whatever the service already holds. */
+    protected fun start() {
+        val service = SaffronStatusService.getInstance(project)
+        onStatus(service.latest)
+        service.refresh()
+    }
+
+    private fun onStatus(load: StatusLoad) {
+        val status = load.status
+        if (status == null) {
+            note.text = load.error?.let { "Status unavailable: $it" } ?: "Loading…"
+            render(null)
+            return
+        }
+        note.text = if (status.packageInstalled) "" else "saffron-ai is not installed here (npm i -D saffron-ai); status came from npx."
+        render(status)
+    }
+
+    protected abstract fun render(status: ProjectStatus?)
+
+    protected fun action(text: String, description: String, icon: Icon, run: () -> Unit): AnAction =
+        object : DumbAwareAction(text, description, icon) {
+            override fun actionPerformed(e: AnActionEvent) = run()
+        }
+
+    protected fun toolbar(vararg actions: AnAction): JPanel {
+        val bar = ActionManager.getInstance().createActionToolbar("SaffronToolWindow", DefaultActionGroup(*actions), true)
+        bar.targetComponent = this
+        return JPanel(BorderLayout()).apply { add(bar.component, BorderLayout.CENTER) }
+    }
+
+    protected fun refreshStatus() = SaffronStatusService.getInstance(project).refresh()
+}
+
+/** Pending proposals: tick, read the narrative, accept or reject. */
+class ProposalsTab(project: Project, parent: Disposable) : StatusTab(project, parent) {
+
+    private val list = CheckBoxList<StatusProposal>()
+    private val details = JBTextArea().apply { isEditable = false; lineWrap = true; wrapStyleWord = true; border = JBUI.Borders.empty(6) }
+    private var items: List<StatusProposal> = emptyList()
+
+    init {
+        toolbar = toolbar(
+            action("Accept Selected", "saffron accept <ticked files>", AllIcons.Actions.Commit) { act("accept", ticked()) },
+            action("Reject Selected", "saffron reject <ticked files>", AllIcons.Actions.Cancel) { act("reject", ticked()) },
+            action("Accept All", "saffron accept --all (UNVERIFIED proposals are skipped)", AllIcons.Actions.Checked) { act("accept", emptyList()) },
+            action("Refresh", "Reload the status", AllIcons.Actions.Refresh) { refreshStatus() },
+        )
+        list.setEmptyText("No proposals pending review")
+        list.addListSelectionListener {
+            val i = list.selectedIndex
+            details.text = if (i >= 0) describe(list.getItemAt(i)) else ""
+            details.caretPosition = 0
+        }
+        val split = JSplitPane(JSplitPane.VERTICAL_SPLIT, JBScrollPane(list), JBScrollPane(details)).apply {
+            resizeWeight = 0.55
+            border = null
+        }
+        setContent(JPanel(BorderLayout()).apply {
+            add(note, BorderLayout.NORTH)
+            add(split, BorderLayout.CENTER)
+        })
+        start()
+    }
+
+    override fun render(status: ProjectStatus?) {
+        val ticked = ticked().map { it.file }.toSet()
+        items = status?.proposals ?: emptyList()
+        list.clear()
+        for (p in items) {
+            val verified = when (p.verified) {
+                true -> "verified"
+                false -> "UNVERIFIED"
+                null -> "unchecked"
+            }
+            list.addItem(p, "${p.feature.substringAfterLast('/')} › ${p.scenario}   ${p.mode} · $verified", p.file in ticked)
+        }
+        if (items.isEmpty()) details.text = ""
+    }
+
+    private fun ticked(): List<StatusProposal> = items.filter { list.isItemSelected(it) }
+
+    private fun act(command: String, selected: List<StatusProposal>) {
+        if (command != "accept" && selected.isEmpty()) return
+        SaffronRunner.execute(project, if (selected.isEmpty()) "Saffron: accept all" else "Saffron: $command ${selected.size} proposal(s)") {
+            it.command = command
+            it.paths = selected.joinToString(" ") { p -> p.file }
+        }
+    }
+
+    private fun describe(p: StatusProposal?): String {
+        p ?: return ""
+        val b = StringBuilder()
+        b.append(p.feature).append(" › ").append(p.scenario).append('\n')
+        b.append("file: ").append(p.file).append('\n')
+        b.append("mode: ").append(p.mode).append(" · created ").append(p.createdAt)
+        if (p.recordedFor != null) b.append(" · recorded for ").append(p.recordedFor)
+        b.append('\n')
+        b.append("proof replay: ").append(
+            when (p.verified) {
+                true -> "verified, replays at zero AI"
+                false -> "FAILED: ${p.proofError ?: "see the proposal file"}"
+                null -> "not run"
+            },
+        ).append('\n')
+        b.append("agent: ").append(p.aiCalls).append(" AI calls")
+        p.costUsd?.let { b.append(" · ≈ $").append("%.2f".format(it)).append(" at API rates") }
+        b.append("\n\n").append(p.narrative).append('\n')
+        if (p.adaptations.isNotEmpty()) {
+            b.append("\nAdaptations:\n")
+            for (a in p.adaptations) b.append("  ⚠ ").append(a).append('\n')
+        }
+        p.suggestedFeatureEdit?.let { b.append("\nSuggested feature edit:\n").append(it).append('\n') }
+        return b.toString()
+    }
+}
+
+/** Tags with scenario counts; tick and run with --filter. */
+class TagsTab(project: Project, parent: Disposable) : StatusTab(project, parent) {
+
+    private val list = CheckBoxList<StatusTag>()
+    private val replayOnly = JBCheckBox("Replay only (no AI)")
+    private val headed = JBCheckBox("Headed browser")
+    private var items: List<StatusTag> = emptyList()
+
+    init {
+        toolbar = toolbar(
+            action("Run Tagged", "saffron run --filter <ticked tags> (any of them)", AllIcons.Actions.Execute) { run() },
+            action("Refresh", "Reload the status", AllIcons.Actions.Refresh) { refreshStatus() },
+        )
+        list.setEmptyText("No @tags in the feature files")
+        val options = JPanel().apply {
+            layout = BoxLayout(this, BoxLayout.X_AXIS)
+            border = JBUI.Borders.empty(4, 6)
+            add(replayOnly)
+            add(javax.swing.Box.createHorizontalStrut(12))
+            add(headed)
+        }
+        setContent(JPanel(BorderLayout()).apply {
+            add(JPanel(BorderLayout()).apply { add(options, BorderLayout.NORTH); add(note, BorderLayout.SOUTH) }, BorderLayout.NORTH)
+            add(JBScrollPane(list), BorderLayout.CENTER)
+        })
+        start()
+    }
+
+    override fun render(status: ProjectStatus?) {
+        val ticked = items.filter { list.isItemSelected(it) }.map { it.tag }.toSet()
+        items = status?.tags ?: emptyList()
+        list.clear()
+        for (t in items) list.addItem(t, "${t.tag}   ${t.scenarios} scenario${if (t.scenarios == 1) "" else "s"}", t.tag in ticked)
+    }
+
+    private fun run() {
+        val tags = items.filter { list.isItemSelected(it) }.map { it.tag }
+        if (tags.isEmpty()) {
+            note.text = "Tick one or more tags first."
+            return
+        }
+        SaffronRunner.execute(project, "Saffron: run ${tags.joinToString(",")}") {
+            it.command = "run"
+            it.paths = ""
+            it.tags = tags.joinToString(",")
+            it.replayOnly = replayOnly.isSelected
+            it.headed = headed.isSelected
+        }
+    }
+}
+
+/** Vocabulary health and the effective configuration. */
+class HealthTab(project: Project, parent: Disposable) : StatusTab(project, parent) {
+
+    private val text = JBTextArea().apply {
+        isEditable = false
+        lineWrap = true
+        wrapStyleWord = true
+        border = JBUI.Borders.empty(6)
+        font = UIUtil.getLabelFont()
+    }
+
+    init {
+        toolbar = toolbar(
+            action("Open saffron.config.json", "Edit the configuration file", AllIcons.Actions.Edit) { openConfig() },
+            action("Refresh", "Reload the status", AllIcons.Actions.Refresh) { refreshStatus() },
+        )
+        setContent(JPanel(BorderLayout()).apply {
+            add(note, BorderLayout.NORTH)
+            add(JBScrollPane(text), BorderLayout.CENTER)
+        })
+        start()
+    }
+
+    override fun render(status: ProjectStatus?) {
+        if (status == null) {
+            text.text = ""
+            return
+        }
+        val v = status.vocabulary
+        val b = StringBuilder()
+        b.append("VOCABULARY\n")
+        b.append("${v.steps} steps: ${v.recorded} recorded, ${v.unrecorded} unrecorded · ${v.stepSets} step sets\n\n")
+        b.append("Divergent steps (same text, different recordings): ${v.divergent.size}\n")
+        for (d in v.divergent) b.append("  ● ").append(d).append('\n')
+        b.append("\nNear-duplicate wordings (probably the same step): ${v.nearDuplicates.size}\n")
+        for (n in v.nearDuplicates) b.append("  ~ \"").append(n.a).append("\"  vs  \"").append(n.b).append("\"  (").append((n.similarity * 100).toInt()).append("%)\n")
+        if (v.divergent.isNotEmpty() || v.nearDuplicates.isNotEmpty()) {
+            b.append("\nEach duplicate wording is a recording paid twice. Rename to the recorded wording, or re-record once and accept the rename edit.\n")
+        }
+        b.append("\nCONFIG  (").append(status.config.file ?: "no saffron.config.json, defaults").append(")\n")
+        for ((k, value) in status.config.effective.entrySet()) {
+            b.append("  ").append(k).append(" = ").append(if (value.isJsonPrimitive) value.asString else value.toString()).append('\n')
+        }
+        b.append("\nRUNNER  saffron-ai ").append(status.version).append(if (status.packageInstalled) " (project install)" else " (npx)").append('\n')
+        text.text = b.toString()
+        text.caretPosition = 0
+    }
+
+    private fun openConfig() {
+        val base = project.basePath ?: return
+        val vf = LocalFileSystem.getInstance().refreshAndFindFileByPath("$base/saffron.config.json")
+        if (vf != null) FileEditorManager.getInstance(project).openFile(vf, true) else note.text = "No saffron.config.json yet: run npx saffron init."
+    }
+}
+
+/** The HTML report, embedded. */
+class DashboardTab(project: Project, parent: Disposable) : StatusTab(project, parent) {
+
+    private val browser: JBCefBrowser? = if (JBCefApp.isSupported()) JBCefBrowser() else null
+    private val placeholder = JBLabel("", JBLabel.CENTER)
+    private var reportPath: Path? = null
+
+    init {
+        toolbar = toolbar(
+            action("Reload", "Reload the report", AllIcons.Actions.Refresh) { refreshStatus() },
+            action("Open in Browser", "Open the report in the system browser", AllIcons.Nodes.PpWeb) { reportPath?.let { BrowserUtil.browse(it.toUri()) } },
+        )
+        browser?.let { com.intellij.openapi.util.Disposer.register(parent, it) }
+        setContent(JPanel(BorderLayout()).apply {
+            add(note, BorderLayout.NORTH)
+            add(browser?.component ?: placeholder, BorderLayout.CENTER)
+        })
+        start()
+    }
+
+    override fun render(status: ProjectStatus?) {
+        val base = project.basePath
+        val rel = status?.lastRun?.reportHtml
+        val path = if (base != null && rel != null) Path.of(base, rel) else null
+        reportPath = path?.takeIf { Files.exists(it) }
+        val b = browser
+        if (b == null) {
+            placeholder.text = if (reportPath != null) "This IDE build has no embedded browser. Use Open in Browser." else "No report yet: run something first."
+            return
+        }
+        val target = reportPath
+        if (target == null) {
+            b.loadHTML("<html><body style=\"font-family:sans-serif;color:#888;padding:24px\">No report yet. Run a feature file and the report appears here.</body></html>")
+        } else {
+            b.loadURL(target.toUri().toString())
+        }
+    }
+}

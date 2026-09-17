@@ -4,6 +4,8 @@ import ai.saffron.jetbrains.run.SaffronCommand
 import ai.saffron.jetbrains.run.SaffronConfigurationType
 import ai.saffron.jetbrains.run.SaffronRunConfiguration
 import ai.saffron.jetbrains.ui.SaffronProjectScan
+import ai.saffron.jetbrains.ui.ProjectStatus
+import com.google.gson.Gson
 import com.intellij.execution.PsiLocation
 import com.intellij.execution.Location
 import com.intellij.execution.RunManager
@@ -49,8 +51,12 @@ class SaffronRunConfigurationTest : BasePlatformTestCase() {
         val c = newConfiguration()
         c.command = "report"; c.paths = "x"; c.tags = "@y"; c.replayOnly = true
         assertEquals(listOf("report"), SaffronCommand.arguments(c))
-        c.command = "accept"
+        c.command = "accept"; c.paths = ""
         assertEquals(listOf("accept", "--all"), SaffronCommand.arguments(c))
+        c.command = "accept"; c.paths = ".saffron/proposals/a/b.json .saffron/proposals/a/c.json"
+        assertEquals(listOf("accept", ".saffron/proposals/a/b.json", ".saffron/proposals/a/c.json"), SaffronCommand.arguments(c))
+        c.command = "reject"; c.paths = ".saffron/proposals/a/b.json"
+        assertEquals(listOf("reject", ".saffron/proposals/a/b.json"), SaffronCommand.arguments(c))
     }
 
     fun `test the command line runs in the project directory with the saffron binary`() {
@@ -118,5 +124,28 @@ class SaffronRunConfigurationTest : BasePlatformTestCase() {
         assertEquals(1, state.pendingProposals)
         assertTrue(state.packageInstalled)
         assertTrue(state.hasReport)
+    }
+
+    fun `test the status JSON from the runner maps onto the data classes`() {
+        val json = """{"tool":"saffron","version":"0.5.4","packageInstalled":true,
+          "config":{"file":"saffron.config.json","effective":{"baseURL":"http://x","retries":2}},
+          "features":[{"path":"features/login.saffron","name":"Login","stepSets":1,
+            "scenarios":[{"name":"Successful login","line":7,"tags":["@smoke"],"outline":false,"rows":1,"cached":true,"proposal":false,"lastStatus":"green"}]}],
+          "tags":[{"tag":"@smoke","scenarios":1}],
+          "proposals":[{"file":".saffron/proposals/login-saffron/login-errors.json","feature":"features/login.saffron","scenario":"Login errors","mode":"record","createdAt":"t","verified":true,"adaptations":[],"narrative":"n","aiCalls":5,"costUsd":1.5}],
+          "lastRun":{"startedAt":"a","finishedAt":"b","totals":{"scenarios":1,"green":1,"yellow":0,"red":0,"aiCalls":0,"costUsd":0,"plan":{"subscriptionType":"max","fiveHourBefore":18,"fiveHourAfter":20}},"reportHtml":".saffron/reports/latest.html"},
+          "history":[{"startedAt":"a","green":1,"yellow":0,"red":0,"aiCalls":0,"costUsd":0}],
+          "vocabulary":{"steps":3,"recorded":2,"unrecorded":1,"stepSets":1,"divergent":["x"],"nearDuplicates":[{"a":"p","b":"q","similarity":0.75}]}}"""
+        val s = Gson().fromJson(json, ProjectStatus::class.java)
+        assertEquals("0.5.4", s.version)
+        assertEquals("Login", s.features[0].name)
+        assertEquals(7, s.features[0].scenarios[0].line)
+        assertEquals("green", s.features[0].scenarios[0].lastStatus)
+        assertEquals(1, s.proposals.size)
+        assertEquals(true, s.proposals[0].verified)
+        assertEquals(20.0, s.lastRun!!.totals.plan!!.fiveHourAfter)
+        assertEquals("x", s.vocabulary.divergent[0])
+        assertEquals(0.75, s.vocabulary.nearDuplicates[0].similarity)
+        assertEquals("http://x", s.config.effective.get("baseURL").asString)
     }
 }

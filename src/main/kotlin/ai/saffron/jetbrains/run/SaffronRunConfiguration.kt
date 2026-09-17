@@ -55,7 +55,7 @@ class SaffronRunConfiguration(project: Project, factory: ConfigurationFactory, n
 
     override fun checkConfiguration() {
         if (command !in SaffronCommand.COMMANDS) {
-            throw RuntimeConfigurationError("Unknown Saffron command \"$command\"; use run, report or accept")
+            throw RuntimeConfigurationError("Unknown Saffron command \"$command\"; use run, report, accept or reject")
         }
         if (project.basePath == null) throw RuntimeConfigurationError("The project has no directory to run in")
     }

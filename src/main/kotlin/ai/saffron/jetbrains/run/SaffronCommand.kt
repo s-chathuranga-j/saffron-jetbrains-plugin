@@ -13,7 +13,7 @@ import java.nio.file.Path
  */
 object SaffronCommand {
 
-    val COMMANDS: List<String> = listOf("run", "report", "accept")
+    val COMMANDS: List<String> = listOf("run", "report", "accept", "reject")
 
     fun localBinary(basePath: String?): Path? {
         val p = basePath?.let { Path.of(it, "node_modules", ".bin", if (SystemInfo.isWindows) "saffron.cmd" else "saffron") }
@@ -42,7 +42,12 @@ object SaffronCommand {
         val args = mutableListOf<String>()
         when (c.command) {
             "report" -> args += "report"
-            "accept" -> args += listOf("accept", "--all")
+            "accept", "reject" -> {
+                // Files or folders holds proposal files here; blank means every proposal.
+                args += c.command
+                val files = splitPaths(c.paths)
+                if (files.isEmpty()) args += "--all" else args += files
+            }
             else -> {
                 args += "run"
                 args += splitPaths(c.paths)

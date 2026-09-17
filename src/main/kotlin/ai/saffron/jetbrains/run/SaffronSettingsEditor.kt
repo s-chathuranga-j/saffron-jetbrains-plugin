@@ -23,7 +23,7 @@ class SaffronSettingsEditor : SettingsEditor<SaffronRunConfiguration>() {
     private val panel: JPanel = FormBuilder.createFormBuilder()
         .addLabeledComponent("Command:", command)
         .addLabeledComponent("Files or folders:", paths)
-        .addTooltip("Relative to the project root, separated by spaces. Blank runs everything under features/.")
+        .addTooltip("Relative to the project root, separated by spaces. run: feature files or folders, blank runs everything under features/. accept / reject: proposal files, blank means --all.")
         .addLabeledComponent("Tags:", tags)
         .addTooltip("Only scenarios carrying any of these @tags, comma separated (for example @smoke,@checkout).")
         .addComponent(replayOnly)
@@ -40,7 +40,8 @@ class SaffronSettingsEditor : SettingsEditor<SaffronRunConfiguration>() {
 
     private fun updateEnabled() {
         val isRun = command.selectedItem == "run"
-        for (c in listOf(paths, tags, replayOnly, headed, rerecord)) c.isEnabled = isRun
+        paths.isEnabled = command.selectedItem != "report"
+        for (c in listOf(tags, replayOnly, headed, rerecord)) c.isEnabled = isRun
     }
 
     override fun resetEditorFrom(c: SaffronRunConfiguration) {

@@ -14,7 +14,7 @@ import com.intellij.openapi.util.NotNullLazyValue
 class SaffronConfigurationType : ConfigurationTypeBase(
     ID,
     "Saffron",
-    "Run Saffron scenarios, open the latest report, or accept pending proposals",
+    "Run Saffron scenarios, open the latest report, accept or reject pending proposals",
     NotNullLazyValue.createValue { SaffronIcons.FILE },
 ) {
     init {
