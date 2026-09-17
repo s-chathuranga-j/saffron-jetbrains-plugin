@@ -9,6 +9,12 @@ version = providers.gradleProperty("pluginVersion").get()
 
 kotlin {
     jvmToolchain(21)
+    compilerOptions {
+        // Do not generate DefaultImpls bridges for platform interfaces
+        // (ToolWindowFactory): the verifier reports them as calls into
+        // deprecated and experimental methods.
+        freeCompilerArgs.add("-Xjvm-default=all")
+    }
 }
 
 repositories {

@@ -152,7 +152,7 @@ class SaffronPanel(private val project: Project, parent: Disposable) : SimpleToo
     private fun openReport() {
         val base = project.basePath ?: return
         val html = java.nio.file.Path.of(base, ".saffron", "reports", "latest.html")
-        if (java.nio.file.Files.exists(html)) BrowserUtil.browse(html.toFile()) else hint.text = "No report yet: run something first."
+        if (java.nio.file.Files.exists(html)) BrowserUtil.browse(html.toUri()) else hint.text = "No report yet: run something first."
     }
 
     private fun acceptAll() = SaffronRunner.execute(project, "Saffron: accept all") { it.command = "accept" }
