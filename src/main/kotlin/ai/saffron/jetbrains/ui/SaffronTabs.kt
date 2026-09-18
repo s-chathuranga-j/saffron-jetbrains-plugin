@@ -82,7 +82,7 @@ class ProposalsTab(project: Project, parent: Disposable) : StatusTab(project, pa
         toolbar = toolbar(
             action("Accept Selected", "saffron accept <ticked files>", AllIcons.Actions.Commit) { act("accept", ticked()) },
             action("Reject Selected", "saffron reject <ticked files>", AllIcons.Actions.Cancel) { act("reject", ticked()) },
-            action("Accept All", "saffron accept --all (UNVERIFIED proposals are skipped)", AllIcons.Actions.Checked) { act("accept", emptyList()) },
+            action("Accept All", "saffron accept --all (UNVERIFIED proposals are skipped)", AllIcons.Actions.Checked) { acceptAll() },
             action("Refresh", "Reload the status", AllIcons.Actions.Refresh) { refreshStatus() },
         )
         list.setEmptyText("No proposals pending review")
@@ -119,11 +119,27 @@ class ProposalsTab(project: Project, parent: Disposable) : StatusTab(project, pa
 
     private fun ticked(): List<StatusProposal> = items.filter { list.isItemSelected(it) }
 
+    /**
+     * Accepting or rejecting what is ticked. An empty selection does nothing:
+     * blank paths mean `--all` to the runner, so this used to accept every
+     * proposal when the reviewer had ticked none of them.
+     */
     private fun act(command: String, selected: List<StatusProposal>) {
-        if (command != "accept" && selected.isEmpty()) return
-        SaffronRunner.execute(project, if (selected.isEmpty()) "Saffron: accept all" else "Saffron: $command ${selected.size} proposal(s)") {
+        if (selected.isEmpty()) {
+            note.text = "Tick the proposals to $command first, or use Accept All."
+            return
+        }
+        SaffronRunner.execute(project, "Saffron: $command ${selected.size} proposal(s)") {
             it.command = command
             it.paths = selected.joinToString(" ") { p -> p.file }
+        }
+    }
+
+    /** The deliberate bulk action, never reachable by leaving the list untouched. */
+    private fun acceptAll() {
+        SaffronRunner.execute(project, "Saffron: accept all") {
+            it.command = "accept"
+            it.paths = ""
         }
     }
 

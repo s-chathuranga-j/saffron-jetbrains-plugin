@@ -57,6 +57,9 @@ class SaffronRunConfigurationTest : BasePlatformTestCase() {
         assertEquals(listOf("accept", ".saffron/proposals/a/b.json", ".saffron/proposals/a/c.json"), SaffronCommand.arguments(c))
         c.command = "reject"; c.paths = ".saffron/proposals/a/b.json"
         assertEquals(listOf("reject", ".saffron/proposals/a/b.json"), SaffronCommand.arguments(c))
+        // Blank paths mean every proposal: only the explicit bulk action may do this.
+        c.command = "reject"; c.paths = ""
+        assertEquals(listOf("reject", "--all"), SaffronCommand.arguments(c))
     }
 
     fun `test the command line runs in the project directory with the saffron binary`() {
