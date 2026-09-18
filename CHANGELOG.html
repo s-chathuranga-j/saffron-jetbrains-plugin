@@ -2,6 +2,7 @@
 <ul>
   <li>The Saffron tool window gains four tabs next to <b>Files</b>. <b>Proposals</b>: tick proposals, read the narrative, proof-replay verdict and cost, then Accept Selected, Reject Selected or Accept All. <b>Tags</b>: every @tag with its scenario count; tick and Run Tagged. <b>Health</b>: vocabulary counts, divergent steps, near-duplicate wordings, the effective config with one click to the file. <b>Dashboard</b>: the HTML report embedded in the IDE, reloaded after each run. The tabs read <code>saffron status --json</code> (saffron-ai 0.5.4 or later).</li>
   <li>Run configurations: <code>accept</code> and <code>reject</code> take proposal files (blank means all).</li>
+  <li><b>The Proposals tab shows what a proposal changes</b>: selecting one loads <code>saffron diff</code> under the narrative, so you approve the action list, not only the agent's account of it. Needs <code>saffron-ai</code> 0.6.1 or later.</li>
   <li><b>Accept Selected with nothing ticked used to accept every proposal</b>: blank paths mean <code>--all</code> to the runner. It now does nothing and says so, and bulk acceptance stays its own action.</li>
   <li>Verifier clean on 2026.3.</li>
 </ul>

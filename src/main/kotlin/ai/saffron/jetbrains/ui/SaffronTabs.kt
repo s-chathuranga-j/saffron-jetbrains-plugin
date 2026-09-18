@@ -1,10 +1,13 @@
 package ai.saffron.jetbrains.ui
 
+import ai.saffron.jetbrains.run.SaffronCommand
 import ai.saffron.jetbrains.run.SaffronRunner
 import com.intellij.icons.AllIcons
 import com.intellij.ide.BrowserUtil
+import com.intellij.execution.util.ExecUtil
 import com.intellij.openapi.Disposable
 import com.intellij.openapi.actionSystem.ActionManager
+import com.intellij.openapi.application.ApplicationManager
 import com.intellij.openapi.actionSystem.AnAction
 import com.intellij.openapi.actionSystem.AnActionEvent
 import com.intellij.openapi.actionSystem.DefaultActionGroup
@@ -77,6 +80,8 @@ class ProposalsTab(project: Project, parent: Disposable) : StatusTab(project, pa
     private val list = CheckBoxList<StatusProposal>()
     private val details = JBTextArea().apply { isEditable = false; lineWrap = true; wrapStyleWord = true; border = JBUI.Borders.empty(6) }
     private var items: List<StatusProposal> = emptyList()
+    /** `saffron diff` output per proposal file: the evidence behind the narrative. */
+    private val diffs = mutableMapOf<String, String>()
 
     init {
         toolbar = toolbar(
@@ -88,8 +93,10 @@ class ProposalsTab(project: Project, parent: Disposable) : StatusTab(project, pa
         list.setEmptyText("No proposals pending review")
         list.addListSelectionListener {
             val i = list.selectedIndex
-            details.text = if (i >= 0) describe(list.getItemAt(i)) else ""
+            val selected = if (i >= 0) list.getItemAt(i) else null
+            details.text = describe(selected)
             details.caretPosition = 0
+            if (selected != null) loadDiff(selected)
         }
         val split = JSplitPane(JSplitPane.VERTICAL_SPLIT, JBScrollPane(list), JBScrollPane(details)).apply {
             resizeWeight = 0.55
@@ -105,6 +112,7 @@ class ProposalsTab(project: Project, parent: Disposable) : StatusTab(project, pa
     override fun render(status: ProjectStatus?) {
         val ticked = ticked().map { it.file }.toSet()
         items = status?.proposals ?: emptyList()
+        diffs.keys.retainAll(items.map { it.file }.toSet())
         list.clear()
         for (p in items) {
             val verified = when (p.verified) {
@@ -118,6 +126,39 @@ class ProposalsTab(project: Project, parent: Disposable) : StatusTab(project, pa
     }
 
     private fun ticked(): List<StatusProposal> = items.filter { list.isItemSelected(it) }
+
+    /**
+     * The action list the reviewer is approving. The narrative is the agent's
+     * account of what it did; this is what it actually recorded, against what
+     * is committed today.
+     */
+    private fun loadDiff(proposal: StatusProposal) {
+        diffs[proposal.file]?.let { cached ->
+            details.text = describe(proposal) + cached
+            details.caretPosition = 0
+            return
+        }
+        val base = project.basePath ?: return
+        ApplicationManager.getApplication().executeOnPooledThread {
+            val text = try {
+                val output = ExecUtil.execAndGetOutput(SaffronCommand.base(base).withParameters("diff", proposal.file), 60_000)
+                if (output.exitCode == 0 && output.stdout.isNotBlank()) {
+                    "\n\nWHAT THIS PROPOSAL CHANGES\n\n" + output.stdout.trim()
+                } else {
+                    "\n\n(could not load the diff: " + output.stderr.trim().lines().lastOrNull().orEmpty() + ")"
+                }
+            } catch (e: Exception) {
+                "\n\n(could not load the diff: " + (e.message ?: e.toString()) + ")"
+            }
+            diffs[proposal.file] = text
+            ApplicationManager.getApplication().invokeLater({
+                if (list.selectedIndex >= 0 && list.getItemAt(list.selectedIndex)?.file == proposal.file) {
+                    details.text = describe(proposal) + text
+                    details.caretPosition = 0
+                }
+            }, project.disposed)
+        }
+    }
 
     /**
      * Accepting or rejecting what is ticked. An empty selection does nothing:
