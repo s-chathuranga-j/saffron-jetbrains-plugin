@@ -23,7 +23,7 @@ class SaffronSettingsEditor : SettingsEditor<SaffronRunConfiguration>() {
     private val panel: JPanel = FormBuilder.createFormBuilder()
         .addLabeledComponent("Command:", command)
         .addLabeledComponent("Files or folders:", paths)
-        .addTooltip("Relative to the project root, separated by spaces. run: feature files or folders, blank runs everything under features/. accept / reject: proposal files, blank means --all.")
+        .addTooltip("Relative to the project root, separated by spaces; put a path that contains a space in double quotes. run: feature files or folders, blank runs everything under features/. accept / reject: proposal files, blank means --all.")
         .addLabeledComponent("Tags:", tags)
         .addTooltip("Only scenarios carrying any of these @tags, comma separated (for example @smoke,@checkout).")
         .addComponent(replayOnly)

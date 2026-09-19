@@ -70,7 +70,17 @@ object SaffronCommand {
     /** One-line description, used as the suggested configuration name. */
     fun describe(c: SaffronRunConfiguration): String = "saffron " + arguments(c).joinToString(" ")
 
-    /** Paths are typed as one field: split on whitespace or commas. */
+    /**
+     * Paths are typed as one field, so they are parsed the way a command line
+     * is: whitespace separates, quotes keep `features/order checkout.saffron`
+     * one path. A trailing comma on an entry is dropped, because "a, b" was
+     * the documented form before; a comma inside a name is part of the name.
+     */
     fun splitPaths(paths: String): List<String> =
-        paths.split(Regex("[\\s,]+")).map { it.trim() }.filter { it.isNotEmpty() }
+        ParametersListUtil.parse(paths.trim())
+            .map { it.trim().trimEnd(',') }
+            .filter { it.isNotEmpty() }
+
+    /** The inverse: what the plugin writes when IT fills the field. */
+    fun joinPaths(paths: List<String>): String = ParametersListUtil.join(paths)
 }

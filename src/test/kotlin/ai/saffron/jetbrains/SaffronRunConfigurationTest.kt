@@ -31,6 +31,23 @@ class SaffronRunConfigurationTest : BasePlatformTestCase() {
         assertTrue(type.factory.createTemplateConfiguration(project) is SaffronRunConfiguration)
     }
 
+    fun `test a path with a space stays one argument`() {
+        val c = newConfiguration()
+        c.command = "run"
+        // What the plugin writes for a ticked or right-clicked file.
+        c.paths = SaffronCommand.joinPaths(listOf("features/order checkout.saffron", "features/login.saffron"))
+        assertEquals(
+            listOf("run", "features/order checkout.saffron", "features/login.saffron"),
+            SaffronCommand.arguments(c),
+        )
+        // What a person types: quotes keep the path whole, a comma inside a name survives.
+        c.paths = "\"features/order checkout.saffron\" features/a,b.saffron"
+        assertEquals(
+            listOf("run", "features/order checkout.saffron", "features/a,b.saffron"),
+            SaffronCommand.arguments(c),
+        )
+    }
+
     fun `test run arguments follow the CLI flags`() {
         val c = newConfiguration()
         c.command = "run"

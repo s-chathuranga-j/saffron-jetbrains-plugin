@@ -1,5 +1,6 @@
 package ai.saffron.jetbrains.ui
 
+import ai.saffron.jetbrains.run.SaffronCommand
 import ai.saffron.jetbrains.run.SaffronRunner
 import com.intellij.execution.ExecutionListener
 import com.intellij.execution.ExecutionManager
@@ -142,7 +143,7 @@ class SaffronPanel(private val project: Project, parent: Disposable) : SimpleToo
             hint.text = "Tick one or more files first, or use Run All."
             return
         }
-        val paths = selected.joinToString(" ") { it.relativePath }
+        val paths = SaffronCommand.joinPaths(selected.map { it.relativePath })
         val name = if (selected.size == 1) "Run ${selected[0].relativePath.substringAfterLast('/')}" else "Saffron: run ${selected.size} files"
         SaffronRunner.execute(project, name) {
             it.command = "run"; it.paths = paths; it.tags = ""; it.replayOnly = replayOnly.isSelected; it.headed = headed.isSelected

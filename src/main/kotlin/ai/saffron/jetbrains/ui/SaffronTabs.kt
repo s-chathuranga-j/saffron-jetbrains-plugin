@@ -80,8 +80,18 @@ class ProposalsTab(project: Project, parent: Disposable) : StatusTab(project, pa
     private val list = CheckBoxList<StatusProposal>()
     private val details = JBTextArea().apply { isEditable = false; lineWrap = true; wrapStyleWord = true; border = JBUI.Borders.empty(6) }
     private var items: List<StatusProposal> = emptyList()
-    /** `saffron diff` output per proposal file: the evidence behind the narrative. */
+    /**
+     * `saffron diff` output per proposal VERSION: the evidence behind the
+     * narrative. A new run overwrites a proposal under the same file name, so
+     * the file name alone would show the old diff beside the new narrative,
+     * and Accept would then promote something the reviewer never read. Only
+     * touched on the EDT.
+     */
     private val diffs = mutableMapOf<String, String>()
+    /** Bumped on every refresh; a diff loaded for an earlier one is discarded. */
+    private var generation = 0
+
+    private fun diffKey(p: StatusProposal) = "${p.file}|${p.createdAt}"
 
     init {
         toolbar = toolbar(
@@ -112,7 +122,10 @@ class ProposalsTab(project: Project, parent: Disposable) : StatusTab(project, pa
     override fun render(status: ProjectStatus?) {
         val ticked = ticked().map { it.file }.toSet()
         items = status?.proposals ?: emptyList()
-        diffs.keys.retainAll(items.map { it.file }.toSet())
+        // The committed cache a diff was computed against may have changed
+        // too (an accept, a pull), so a refresh invalidates every diff.
+        generation++
+        diffs.clear()
         list.clear()
         for (p in items) {
             val verified = when (p.verified) {
@@ -133,12 +146,14 @@ class ProposalsTab(project: Project, parent: Disposable) : StatusTab(project, pa
      * is committed today.
      */
     private fun loadDiff(proposal: StatusProposal) {
-        diffs[proposal.file]?.let { cached ->
+        val key = diffKey(proposal)
+        diffs[key]?.let { cached ->
             details.text = describe(proposal) + cached
             details.caretPosition = 0
             return
         }
         val base = project.basePath ?: return
+        val loadedFor = generation
         ApplicationManager.getApplication().executeOnPooledThread {
             val text = try {
                 val output = ExecUtil.execAndGetOutput(SaffronCommand.base(base).withParameters("diff", proposal.file), 60_000)
@@ -150,10 +165,14 @@ class ProposalsTab(project: Project, parent: Disposable) : StatusTab(project, pa
             } catch (e: Exception) {
                 "\n\n(could not load the diff: " + (e.message ?: e.toString()) + ")"
             }
-            diffs[proposal.file] = text
             ApplicationManager.getApplication().invokeLater({
-                if (list.selectedIndex >= 0 && list.getItemAt(list.selectedIndex)?.file == proposal.file) {
-                    details.text = describe(proposal) + text
+                // A refresh happened while this ran: the answer describes a
+                // proposal or a committed cache that may no longer exist.
+                if (loadedFor != generation) return@invokeLater
+                diffs[key] = text
+                val selected = if (list.selectedIndex >= 0) list.getItemAt(list.selectedIndex) else null
+                if (selected != null && diffKey(selected) == key) {
+                    details.text = describe(selected) + text
                     details.caretPosition = 0
                 }
             }, project.disposed)
@@ -172,7 +191,7 @@ class ProposalsTab(project: Project, parent: Disposable) : StatusTab(project, pa
         }
         SaffronRunner.execute(project, "Saffron: $command ${selected.size} proposal(s)") {
             it.command = command
-            it.paths = selected.joinToString(" ") { p -> p.file }
+            it.paths = SaffronCommand.joinPaths(selected.map { p -> p.file })
         }
     }
 

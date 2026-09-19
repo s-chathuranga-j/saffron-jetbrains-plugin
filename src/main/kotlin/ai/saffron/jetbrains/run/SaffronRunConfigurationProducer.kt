@@ -26,7 +26,7 @@ class SaffronRunConfigurationProducer : LazyRunConfigurationProducer<SaffronRunC
     ): Boolean {
         val target = target(context) ?: return false
         configuration.command = "run"
-        configuration.paths = relativePath(context, target)
+        configuration.paths = SaffronCommand.joinPaths(listOf(relativePath(context, target)))
         configuration.name = "Run ${target.name}"
         return true
     }
@@ -34,7 +34,7 @@ class SaffronRunConfigurationProducer : LazyRunConfigurationProducer<SaffronRunC
     override fun isConfigurationFromContext(configuration: SaffronRunConfiguration, context: ConfigurationContext): Boolean {
         val target = target(context) ?: return false
         return configuration.command == "run" &&
-            configuration.paths == relativePath(context, target) &&
+            SaffronCommand.splitPaths(configuration.paths) == listOf(relativePath(context, target)) &&
             configuration.tags.isBlank()
     }
 

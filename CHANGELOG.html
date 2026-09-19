@@ -5,6 +5,8 @@
   <li><b>The Proposals tab shows what a proposal changes</b>: selecting one loads <code>saffron diff</code> under the narrative, so you approve the action list, not only the agent's account of it. Needs <code>saffron-ai</code> 0.6.1 or later.</li>
   <li><b>Accept Selected with nothing ticked used to accept every proposal</b>: blank paths mean <code>--all</code> to the runner. It now does nothing and says so, and bulk acceptance stays its own action.</li>
   <li><b>An Orphans tab</b>: caches and pending proposals whose scenario no longer exists, grouped and explained (the scenario is gone from the file, or the file itself is gone). Double-click opens the recording; <b>Remove All</b> runs <code>saffron prune --yes</code> after a confirmation. <code>prune</code> is also a run configuration command, where listing is the default and deleting is opt-in. Needs the <code>saffron-ai</code> release that added <code>saffron prune</code>.</li>
+  <li><b>The Proposals tab could show an old diff beside a new narrative.</b> Diffs were cached by file name, and a new run overwrites a proposal under the same name, so Accept could promote something the reviewer never read. Every refresh now invalidates the diffs, a diff that finishes loading after a refresh is discarded, and the cache is only touched on the UI thread.</li>
+  <li><b>A path with a space stays one path.</b> <code>features/order checkout.saffron</code> was split into two arguments, including for right-clicked and ticked files. Paths are now parsed like a command line (quotes keep a path whole), and whatever the plugin writes itself is quoted to match.</li>
   <li>Verifier clean on 2026.3.</li>
 </ul>
 <h3>0.2.0</h3>
