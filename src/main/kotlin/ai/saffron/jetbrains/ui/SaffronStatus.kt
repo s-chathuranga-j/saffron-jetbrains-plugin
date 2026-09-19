@@ -82,6 +82,15 @@ class StatusVocabulary(
     val duplicateWordings: List<DuplicateWording> = emptyList(),
 )
 
+/** A cache or proposal no scenario owns any more; `saffron prune` removes it. */
+class StatusOrphan(
+    val file: String = "",
+    val kind: String = "cache",
+    val feature: String? = null,
+    val scenario: String? = null,
+    val reason: String = "unknown",
+)
+
 class StatusConfig(val file: String? = null, val effective: JsonObject = JsonObject())
 
 class ProjectStatus(
@@ -94,6 +103,8 @@ class ProjectStatus(
     val lastRun: StatusLastRun? = null,
     val history: List<StatusHistoryRun> = emptyList(),
     val vocabulary: StatusVocabulary = StatusVocabulary(),
+    /** Null when the runner predates `saffron prune`: absent, not empty. */
+    val orphans: List<StatusOrphan>? = null,
 )
 
 /** Result of one load: the status, or why it is unavailable. */
