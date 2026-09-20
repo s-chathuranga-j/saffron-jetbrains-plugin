@@ -1,10 +1,8 @@
 package ai.saffron.jetbrains
 
-import com.intellij.ide.plugins.PluginManagerCore
 import com.intellij.ide.util.PropertiesComponent
 import com.intellij.notification.NotificationGroupManager
 import com.intellij.notification.NotificationType
-import com.intellij.openapi.extensions.PluginId
 import com.intellij.openapi.project.Project
 import com.intellij.openapi.startup.ProjectActivity
 import java.nio.file.Files
@@ -23,8 +21,7 @@ class SaffronStartupActivity : ProjectActivity {
         // LSP4IJ is an optional dependency: without it the plugin still loads,
         // but there is no completion, go-to-definition or diagnostics. Say so
         // once, because nothing else will.
-        val lsp4ij = PluginManagerCore.getPlugin(PluginId.getId(LSP4IJ_ID))
-        if (lsp4ij == null || !lsp4ij.isEnabled) {
+        if (!lsp4ijAvailable()) {
             hintOnce(
                 project,
                 LSP_HINT_SHOWN_KEY,
@@ -48,6 +45,20 @@ class SaffronStartupActivity : ProjectActivity {
         }
     }
 
+    /**
+     * Whether LSP4IJ is installed AND enabled, asked the way that needs no
+     * plugin-manager API (those are internal or deprecated from 2026.2): an
+     * optional dependency's classes are visible to this plugin's class loader
+     * exactly when that dependency is loaded.
+     */
+    private fun lsp4ijAvailable(): Boolean =
+        try {
+            Class.forName("com.redhat.devtools.lsp4ij.LanguageServerFactory", false, javaClass.classLoader)
+            true
+        } catch (_: Throwable) {
+            false
+        }
+
     private fun hintOnce(project: Project, key: String, title: String, body: String) {
         val props = PropertiesComponent.getInstance(project)
         if (props.getBoolean(key, false)) return
@@ -61,6 +72,5 @@ class SaffronStartupActivity : ProjectActivity {
     private companion object {
         const val HINT_SHOWN_KEY = "ai.saffron.jetbrains.installHintShown"
         const val LSP_HINT_SHOWN_KEY = "ai.saffron.jetbrains.lsp4ijHintShown"
-        const val LSP4IJ_ID = "com.redhat.devtools.lsp4ij"
     }
 }
