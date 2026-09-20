@@ -28,7 +28,7 @@ The grammar under `src/main/resources/textmate/` is the same one shipped in `saf
 
 ## Source and issues
 
-Source: https://github.com/s-chathuranga-j/saffron-jetbrains-plugin. Bug reports and questions: https://github.com/s-chathuranga-j/saffron-ai/issues (the shared Saffron tracker).
+Source: https://github.com/s-chathuranga-j/saffron-jetbrains-plugin. Bug reports and questions: https://github.com/s-chathuranga-j/saffron-community/issues (the shared Saffron tracker).
 
 ## License
 
