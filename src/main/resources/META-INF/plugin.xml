@@ -1,7 +1,7 @@
 <idea-plugin>
     <id>ai.saffron.jetbrains</id>
     <name>Saffron</name>
-    <vendor email="genius.chathuranga@gmail.com" url="https://saffron-ai.lovable.app">Chathuranga Jayasinghe</vendor>
+    <vendor email="genius.chathuranga@gmail.com" url="https://saffron-ai.io">Chathuranga Jayasinghe</vendor>
 
     <depends>com.intellij.modules.platform</depends>
     <depends>com.intellij.modules.lang</depends>

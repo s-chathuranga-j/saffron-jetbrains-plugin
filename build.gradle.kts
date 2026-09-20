@@ -48,7 +48,7 @@ intellijPlatform {
         vendor {
             name = "Chathuranga Jayasinghe"
             email = "genius.chathuranga@gmail.com"
-            url = "https://saffron-ai.lovable.app"
+            url = "https://saffron-ai.io"
         }
     }
 

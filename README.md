@@ -2,7 +2,7 @@
 
 [![Build](https://github.com/s-chathuranga-j/saffron-jetbrains-plugin/actions/workflows/build.yml/badge.svg)](https://github.com/s-chathuranga-j/saffron-jetbrains-plugin/actions/workflows/build.yml)
 
-Language support for [Saffron](https://saffron-ai.lovable.app) `.saffron` files in IntelliJ IDEA, WebStorm, PyCharm, Rider and other JetBrains IDEs (2024.2+, Community editions included).
+Language support for [Saffron](https://saffron-ai.io) `.saffron` files in IntelliJ IDEA, WebStorm, PyCharm, Rider and other JetBrains IDEs (2024.2+, Community editions included).
 
 - **Highlighting** for `.saffron` (Gherkin + `StepSet`): bundled TextMate grammar, no setup.
 - **Completion, go-to-definition, hover, diagnostics** for `.saffron` and `.feature`. Served by `saffron lsp` from the `saffron-ai` npm package, wired through [LSP4IJ](https://plugins.jetbrains.com/plugin/23257-lsp4ij) when it is installed (an optional dependency since 0.2.2, so the plugin also installs on IDE builds LSP4IJ has not reached yet).
