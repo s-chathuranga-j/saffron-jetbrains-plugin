@@ -5,13 +5,13 @@
 Language support for [Saffron](https://saffron-ai.lovable.app) `.saffron` files in IntelliJ IDEA, WebStorm, PyCharm, Rider and other JetBrains IDEs (2024.2+, Community editions included).
 
 - **Highlighting** for `.saffron` (Gherkin + `StepSet`): bundled TextMate grammar, no setup.
-- **Completion, go-to-definition, hover, diagnostics** for `.saffron` and `.feature`. Served by `saffron lsp` from the `saffron-ai` npm package, wired through [LSP4IJ](https://plugins.jetbrains.com/plugin/23257-lsp4ij) automatically.
+- **Completion, go-to-definition, hover, diagnostics** for `.saffron` and `.feature`. Served by `saffron lsp` from the `saffron-ai` npm package, wired through [LSP4IJ](https://plugins.jetbrains.com/plugin/23257-lsp4ij) when it is installed (an optional dependency since 0.2.3, so the plugin also installs on IDE builds LSP4IJ has not reached yet).
 - **Run configurations**: Run/Debug Configurations → Add New Configuration → **Saffron** (`run` with files, folders, tags, replay-only, headed, re-record and extra arguments; `report`; `accept`). Right-click a `.saffron` file or a folder of them → **Run**. Output in the Run tool window.
 - **Saffron tool window** (right side), six tabs. **Files**: feature files with scenario counts, search, tick and Run Selected, Run All, Open Report, Accept All Proposals, last-run totals, pending proposals. **Proposals**: tick, read the narrative, the proof-replay verdict and the action-level diff of what the proposal changes, then Accept Selected / Reject Selected / Accept All. **Tags**: tick tags and Run Tagged. **Health**: vocabulary counts, divergent steps, near-duplicate wordings, effective config. **Orphans**: caches and pending proposals whose scenario no longer exists, with the reason; double-click to open one, Remove All to run `saffron prune --yes` after a confirmation. **Dashboard**: the run report embedded in the IDE. The tabs (plugin 0.2.1 and later) read `saffron status --json` from saffron-ai 0.5.4 or later.
 
 ## Use
 
-1. Install **Saffron** from the JetBrains Marketplace (LSP4IJ is installed as a dependency).
+1. Install **Saffron** from the JetBrains Marketplace, and **LSP4IJ** for completion, go-to-definition and diagnostics.
 2. In your project: `npm i -D saffron-ai` (once). The plugin runs the project-local `saffron lsp`; without the package it falls back to `npx saffron lsp` and shows a hint.
 3. Open a `.saffron` file.
 

@@ -1,3 +1,7 @@
+<h3>0.2.3</h3>
+<ul>
+  <li><b>LSP4IJ is now an optional dependency.</b> The plugin used to refuse to install on an IDE build that LSP4IJ had not been released for yet, which is every new EAP for a while (reported by the Marketplace verifier on 2026.3 EAP). Highlighting, run configurations and the Saffron tool window need nothing from LSP4IJ and now work without it; completion, go-to-definition, hover and diagnostics switch on when LSP4IJ is installed. A one-time notification says so when it is missing.</li>
+</ul>
 <h3>0.2.2</h3>
 <ul>
   <li><b>The Proposals tab shows what a proposal changes</b>: selecting one loads <code>saffron diff</code> under the narrative, so you approve the action list, not only the agent's account of it. Needs <code>saffron-ai</code> 0.6.1 or later.</li>

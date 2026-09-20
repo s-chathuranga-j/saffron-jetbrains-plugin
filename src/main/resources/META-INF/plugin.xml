@@ -6,7 +6,12 @@
     <depends>com.intellij.modules.platform</depends>
     <depends>com.intellij.modules.lang</depends>
     <depends>org.jetbrains.plugins.textmate</depends>
-    <depends>com.redhat.devtools.lsp4ij</depends>
+    <!-- Optional on purpose. The file type, highlighting, run configurations
+         and the tool window need nothing from LSP4IJ, and an IDE build that
+         LSP4IJ has not been released for yet (every new EAP, for a while)
+         would otherwise refuse the whole plugin. With LSP4IJ installed, the
+         language server below is registered; without it, everything else works. -->
+    <depends optional="true" config-file="saffron-lsp4ij.xml">com.redhat.devtools.lsp4ij</depends>
 
     <extensions defaultExtensionNs="com.intellij">
         <!-- .saffron is a Saffron file: icon + registration; colors come from the
@@ -31,7 +36,4 @@
         <notificationGroup id="Saffron" displayType="BALLOON"/>
         <postStartupActivity implementation="ai.saffron.jetbrains.SaffronStartupActivity"/>
     </extensions>
-
-    <xi:include xmlns:xi="http://www.w3.org/2001/XInclude" href="/META-INF/saffron-lsp4ij.xml"
-                xpointer="xpointer(/idea-plugin/*)"/>
 </idea-plugin>
