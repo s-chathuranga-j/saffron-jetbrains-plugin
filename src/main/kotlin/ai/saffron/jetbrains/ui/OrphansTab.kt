@@ -92,20 +92,30 @@ class OrphansTab(project: Project, parent: Disposable) : StatusTab(project, pare
         }
         count = orphans.size
         tree.emptyText.text = "Every recording belongs to a scenario"
-        for ((kind, label) in listOf("cache" to "Caches", "proposal" to "Pending proposals")) {
+        for ((kind, label) in listOf("cache" to "Caches", "proposal" to "Pending proposals", "artifact" to "Screenshot folders")) {
             val group = orphans.filter { it.kind == kind }
             if (group.isEmpty()) continue
             val parent = DefaultMutableTreeNode(OrphanRow(label, "${group.size}", AllIcons.Nodes.Folder))
             for (o in group) {
                 parent.add(
                     DefaultMutableTreeNode(
-                        OrphanRow(
-                            o.scenario ?: o.file.substringAfterLast('/'),
-                            "${o.feature ?: ""} · ${why(o.reason)}".trim(' ', '·'),
-                            AllIcons.General.Warning,
-                            "${o.file}\n${why(o.reason)}\nDouble-click to open the recording.",
-                            o.file,
-                        ),
+                        if (kind == "artifact") {
+                            // A folder of pictures: nothing to open as a file.
+                            OrphanRow(
+                                o.file.split('/').takeLast(2).joinToString("/"),
+                                "failure screenshots of a scenario that is gone",
+                                AllIcons.FileTypes.Image,
+                                o.file,
+                            )
+                        } else {
+                            OrphanRow(
+                                o.scenario ?: o.file.substringAfterLast('/'),
+                                "${o.feature ?: ""} · ${why(o.reason)}".trim(' ', '·'),
+                                AllIcons.General.Warning,
+                                "${o.file}\n${why(o.reason)}\nDouble-click to open the recording.",
+                                o.file,
+                            )
+                        },
                     ),
                 )
             }
@@ -138,8 +148,8 @@ class OrphansTab(project: Project, parent: Disposable) : StatusTab(project, pare
         }
         val answer = Messages.showYesNoDialog(
             project,
-            "Delete $count recording${if (count == 1) "" else "s"} that no scenario owns?\n\n" +
-                "They have to be re-recorded if you delete them by mistake.",
+            "Delete $count item${if (count == 1) "" else "s"} that no scenario owns (recordings, proposals and screenshot folders)?\n\n" +
+                "A recording has to be re-recorded if you delete it by mistake.",
             "Remove Orphaned Recordings",
             "Delete",
             "Cancel",
