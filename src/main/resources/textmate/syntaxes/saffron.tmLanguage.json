@@ -61,7 +61,12 @@
           "name": "punctuation.separator.saffron"
         },
         "3": {
-          "name": "entity.name.section.saffron"
+          "name": "entity.name.section.saffron",
+          "patterns": [
+            {
+              "include": "#token"
+            }
+          ]
         }
       }
     },
@@ -139,7 +144,7 @@
       "name": "variable.parameter.placeholder.saffron"
     },
     "token": {
-      "match": "\\{(env:[A-Za-z_][A-Za-z0-9_]*|date(?:[+-]\\d+)?(?::[^}]+)?)\\}",
+      "match": "\\{(env:[A-Za-z_][A-Za-z0-9_]*|data:[A-Za-z0-9_.-]+|unique:[A-Za-z0-9_-]+(?::digits)?|date(?:[+-]\\d+)?(?::[^}]+)?)\\}",
       "name": "constant.other.token.saffron"
     }
   },
