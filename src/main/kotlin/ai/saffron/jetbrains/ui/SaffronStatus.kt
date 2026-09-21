@@ -67,7 +67,27 @@ class StatusTotals(
 
 class StatusPlan(val subscriptionType: String = "", val fiveHourBefore: Double? = null, val fiveHourAfter: Double? = null)
 
-class StatusLastRun(val startedAt: String = "", val finishedAt: String = "", val totals: StatusTotals = StatusTotals(), val reportHtml: String? = null)
+class StatusEvidence(val kind: String = "failure", val file: String = "", val step: String? = null)
+
+/** A scenario of the last run that was not green, with the screenshots taken. */
+class StatusAttention(
+    val feature: String = "",
+    val scenario: String = "",
+    val baseScenario: String = "",
+    val status: String = "red",
+    val error: String? = null,
+    val failedStep: String? = null,
+    val evidence: List<StatusEvidence> = emptyList(),
+)
+
+class StatusLastRun(
+    val startedAt: String = "",
+    val finishedAt: String = "",
+    val totals: StatusTotals = StatusTotals(),
+    val reportHtml: String? = null,
+    /** Null when the runner predates failure screenshots: absent, not empty. */
+    val attention: List<StatusAttention>? = null,
+)
 
 class StatusHistoryRun(val startedAt: String = "", val green: Int = 0, val yellow: Int = 0, val red: Int = 0, val aiCalls: Int = 0, val costUsd: Double = 0.0)
 
