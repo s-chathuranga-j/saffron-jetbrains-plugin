@@ -133,7 +133,8 @@ class ProposalsTab(project: Project, parent: Disposable) : StatusTab(project, pa
                 false -> "UNVERIFIED"
                 null -> "unchecked"
             }
-            list.addItem(p, "${p.feature.substringAfterLast('/')} › ${p.scenario}   ${p.mode} · $verified", p.file in ticked)
+            val state = if (p.stale != null) "STALE · $verified" else "${p.mode} · $verified"
+            list.addItem(p, "${p.feature.substringAfterLast('/')} › ${p.scenario}   $state", p.file in ticked)
         }
         if (items.isEmpty()) details.text = ""
     }
@@ -211,6 +212,8 @@ class ProposalsTab(project: Project, parent: Disposable) : StatusTab(project, pa
         b.append("mode: ").append(p.mode).append(" · created ").append(p.createdAt)
         if (p.recordedFor != null) b.append(" · recorded for ").append(p.recordedFor)
         b.append('\n')
+        p.stale?.let { b.append("STALE, cannot be accepted: ").append(it).append(". Run the scenario again for a fresh proposal, or reject this one.\n") }
+        if (p.unbound == true) b.append("Filed by an older runner: changes to the scenario or the recording since cannot be detected.\n")
         b.append("proof replay: ").append(
             when (p.verified) {
                 true -> "verified, replays at zero AI"

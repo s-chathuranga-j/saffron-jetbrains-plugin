@@ -46,6 +46,9 @@ class StatusProposal(
     val createdAt: String = "",
     val verified: Boolean? = null,
     val proofError: String? = null,
+    /** Why the proposal can no longer be accepted as reviewed; null while it is still bound to what it was made against. */
+    val stale: String? = null,
+    val unbound: Boolean? = null,
     val adaptations: List<String> = emptyList(),
     val narrative: String = "",
     val suggestedFeatureEdit: String? = null,
