@@ -13,7 +13,7 @@ import java.nio.file.Path
  */
 object SaffronCommand {
 
-    val COMMANDS: List<String> = listOf("run", "report", "accept", "reject", "prune")
+    val COMMANDS: List<String> = listOf("run", "report", "trace", "accept", "reject", "prune")
 
     fun localBinary(basePath: String?): Path? {
         val p = basePath?.let { Path.of(it, "node_modules", ".bin", if (SystemInfo.isWindows) "saffron.cmd" else "saffron") }
@@ -42,6 +42,13 @@ object SaffronCommand {
         val args = mutableListOf<String>()
         when (c.command) {
             "report" -> args += "report"
+            // The execution replay of one scenario: Files or folders holds
+            // the scenario name (or feature:scenario); blank picks the one
+            // failed scenario with a trace.
+            "trace" -> {
+                args += "trace"
+                if (c.paths.isNotBlank()) args += c.paths.trim()
+            }
             // Listing is the safe default; the tool window adds --yes through
             // extra arguments after asking.
             "prune" -> args += "prune"

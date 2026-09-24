@@ -1,5 +1,6 @@
 package ai.saffron.jetbrains.ui
 
+import ai.saffron.jetbrains.run.SaffronRunner
 import com.intellij.icons.AllIcons
 import com.intellij.openapi.Disposable
 import com.intellij.openapi.fileEditor.FileEditorManager
@@ -58,6 +59,7 @@ class LastRunTab(project: Project, parent: Disposable) : StatusTab(project, pare
     init {
         toolbar = toolbar(
             action("Open Screenshot", "The page at the moment the selected scenario went wrong", AllIcons.FileTypes.Image) { openScreenshot() },
+            action("Open Replay", "Step through the selected scenario's run: the page at every action, the network alongside (saffron trace)", AllIcons.Actions.Execute) { openReplay() },
             action("Open Scenario", "Jump to the selected scenario in its feature file", AllIcons.Actions.EditSource) { openScenario() },
             action("Refresh", "Reload the status", AllIcons.Actions.Refresh) { refreshStatus() },
         )
@@ -92,7 +94,7 @@ class LastRunTab(project: Project, parent: Disposable) : StatusTab(project, pare
             if (group.isEmpty()) continue
             val parent = DefaultMutableTreeNode(RunRow(label, "${group.size}", AllIcons.Nodes.Folder))
             for (a in group) {
-                val shot = a.evidence.firstOrNull()
+                val shot = a.evidence.firstOrNull { it.kind != "trace" }
                 parent.add(
                     DefaultMutableTreeNode(
                         RunRow(
@@ -119,8 +121,24 @@ class LastRunTab(project: Project, parent: Disposable) : StatusTab(project, pare
     private fun selected(): StatusAttention? =
         ((tree.lastSelectedPathComponent as? DefaultMutableTreeNode)?.userObject as? RunRow)?.attention
 
+    /** `saffron trace <scenario>` in the Run tool window; it prints the replay's URL and opens it. */
+    private fun openReplay(): Boolean {
+        val a = selected() ?: return false
+        if (a.evidence.none { it.kind == "trace" }) {
+            note.text = "No execution trace for this scenario. Set \"trace\": \"retain-on-failure\" in saffron.config.json and run again."
+            return false
+        }
+        SaffronRunner.execute(project, "Saffron: replay") {
+            it.command = "trace"
+            it.paths = a.scenario
+            it.extraArgs = ""
+        }
+        return true
+    }
+
     private fun openScreenshot(): Boolean {
-        val shot = selected()?.evidence?.firstOrNull() ?: return false
+        // A trace is not a picture; the pictures come first, the replay has its own action.
+        val shot = selected()?.evidence?.firstOrNull { it.kind != "trace" } ?: return false
         val base = project.basePath ?: return false
         val vf = LocalFileSystem.getInstance().refreshAndFindFileByPath("$base/${shot.file}")
         if (vf == null) {
