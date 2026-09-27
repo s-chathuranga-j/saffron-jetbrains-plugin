@@ -1,6 +1,9 @@
 package ai.saffron.jetbrains
 
 import ai.saffron.jetbrains.ui.LastRunTab
+import ai.saffron.jetbrains.ui.ProposalsTab
+import ai.saffron.jetbrains.ui.SaffronStatusService
+import ai.saffron.jetbrains.ui.StatusProposal
 import ai.saffron.jetbrains.ui.checkedCopy
 import ai.saffron.jetbrains.ui.currentEvidence
 import ai.saffron.jetbrains.ui.evidenceCopies
@@ -16,6 +19,7 @@ import com.intellij.openapi.util.SystemInfo
 import com.intellij.testFramework.PlatformTestUtil
 import com.intellij.testFramework.TestActionEvent
 import com.intellij.testFramework.fixtures.BasePlatformTestCase
+import com.intellij.ui.CheckBoxList
 import com.intellij.ui.components.JBLabel
 import com.intellij.ui.treeStructure.Tree
 import com.intellij.util.ui.UIUtil
@@ -199,6 +203,53 @@ class SaffronPluginTest : BasePlatformTestCase() {
             }
             made.forEach { it.toFile().deleteRecursively() }
             copies.forEach { it.deleteRecursively() }
+        }
+    }
+
+    /**
+     * The Proposals tab against a stand-in `saffron` whose status a run
+     * rewrites: a tick survives a refresh, but not a new proposal filed
+     * under the same name, which Accept Selected would decide unseen.
+     */
+    fun `test a ticked proposal comes back unticked once a later run replaced it`() {
+        // The stand-in below is a shell script.
+        if (SystemInfo.isWindows) return
+        val base = Path.of(project.basePath!!)
+        val made = listOf(base.resolve("node_modules"), base.resolve(".saffron"))
+        try {
+            val status = base.resolve(".saffron/status.json")
+            Files.createDirectories(status.parent)
+            fun listed(revision: String) = Files.writeString(
+                status,
+                """{"packageInstalled":true,"proposals":[{"file":".saffron/proposals/login-saffron/sign-in.json",""" +
+                    """"feature":"features/login.saffron","scenario":"Sign in","revision":"$revision"}]}""",
+            )
+            listed("a".repeat(64))
+            val bin = base.resolve("node_modules/.bin/saffron")
+            Files.createDirectories(bin.parent)
+            Files.writeString(bin, "#!/bin/sh\ncat '$status'\n")
+            bin.toFile().setExecutable(true)
+
+            val tab = ProposalsTab(project, testRootDisposable)
+            @Suppress("UNCHECKED_CAST")
+            val list = UIUtil.findComponentOfType(tab, CheckBoxList::class.java) as CheckBoxList<StatusProposal>
+            fun row() = if (list.itemsCount == 1) list.getItemAt(0) else null
+            PlatformTestUtil.waitWithEventsDispatching("the status never loaded", { row()?.revision == "a".repeat(64) }, 60)
+            val ticked = row()!!
+            list.setItemSelected(ticked, true)
+
+            // The same proposal, listed again: still ticked.
+            SaffronStatusService.getInstance(project).refresh()
+            PlatformTestUtil.waitWithEventsDispatching("the status never reloaded", { row().let { it != null && it !== ticked } }, 60)
+            assertTrue(list.isItemSelected(row()!!))
+
+            // A run files a new proposal under the same name.
+            listed("b".repeat(64))
+            SaffronStatusService.getInstance(project).refresh()
+            PlatformTestUtil.waitWithEventsDispatching("the replacement never loaded", { row()?.revision == "b".repeat(64) }, 60)
+            assertFalse(list.isItemSelected(row()!!))
+        } finally {
+            made.forEach { it.toFile().deleteRecursively() }
         }
     }
 }

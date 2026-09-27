@@ -168,7 +168,7 @@ class LastRunTab(project: Project, parent: Disposable) : StatusTab(project, pare
         if (a.evidence.none { it.kind == "trace" }) {
             // An older runner has no trace setting, so following the second
             // half alone would bring this same message back.
-            note.text = "No execution trace for \"${a.scenario}\". Open Replay needs saffron-ai newer than 0.8.5, with \"trace\": \"retain-on-failure\" in saffron.config.json; then run again."
+            note.text = "No execution trace for \"${a.scenario}\". Open Replay needs saffron-ai 0.9.0 or later, with \"trace\": \"retain-on-failure\" in saffron.config.json; then run again."
             return false
         }
         clearNote()

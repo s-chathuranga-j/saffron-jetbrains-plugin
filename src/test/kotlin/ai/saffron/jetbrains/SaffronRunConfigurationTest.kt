@@ -6,6 +6,7 @@ import ai.saffron.jetbrains.run.SaffronRunConfiguration
 import ai.saffron.jetbrains.run.SaffronSettingsEditor
 import ai.saffron.jetbrains.ui.SaffronProjectScan
 import ai.saffron.jetbrains.ui.ProjectStatus
+import ai.saffron.jetbrains.ui.StatusProposal
 import com.google.gson.Gson
 import com.intellij.execution.PsiLocation
 import com.intellij.execution.Location
@@ -218,7 +219,7 @@ class SaffronRunConfigurationTest : BasePlatformTestCase() {
           "features":[{"path":"features/login.saffron","name":"Login","stepSets":1,
             "scenarios":[{"name":"Successful login","line":7,"tags":["@smoke"],"outline":false,"rows":1,"cached":true,"proposal":false,"lastStatus":"green"}]}],
           "tags":[{"tag":"@smoke","scenarios":1}],
-          "proposals":[{"file":".saffron/proposals/login-saffron/login-errors.json","feature":"features/login.saffron","scenario":"Login errors","mode":"record","createdAt":"t","verified":true,"adaptations":[],"narrative":"n","aiCalls":5,"costUsd":1.5}],
+          "proposals":[{"file":".saffron/proposals/login-saffron/login-errors.json","feature":"features/login.saffron","scenario":"Login errors","mode":"record","createdAt":"t","verified":true,"adaptations":[],"narrative":"n","aiCalls":5,"costUsd":1.5,"revision":"$digest"}],
           "lastRun":{"startedAt":"a","finishedAt":"b","totals":{"scenarios":1,"green":1,"yellow":0,"red":0,"aiCalls":0,"costUsd":0,"plan":{"subscriptionType":"max","fiveHourBefore":18,"fiveHourAfter":20}},"reportHtml":".saffron/reports/latest.html",
             "attention":[{"feature":"features/login.saffron","scenario":"Login errors","baseScenario":"Login errors","status":"red","error":"Timed out","failedStep":"I should see the error",
               "evidence":[{"kind":"trace","file":".saffron/artifacts/login-saffron/login-errors/trace.zip"},
@@ -232,6 +233,7 @@ class SaffronRunConfigurationTest : BasePlatformTestCase() {
         assertEquals("green", s.features[0].scenarios[0].lastStatus)
         assertEquals(1, s.proposals.size)
         assertEquals(true, s.proposals[0].verified)
+        assertEquals(digest, s.proposals[0].revision)
         assertEquals(20.0, s.lastRun!!.totals.plan!!.fiveHourAfter)
         assertEquals("x", s.vocabulary.divergent[0])
         assertEquals(listOf("p", "q"), s.vocabulary.duplicateWordings[0].steps)
@@ -244,5 +246,21 @@ class SaffronRunConfigurationTest : BasePlatformTestCase() {
         // field would switch it off without anything else failing.
         assertEquals(digest, attention.evidence[1].sha256)
         assertEquals("I should see the error", attention.evidence[1].step)
+    }
+
+    fun `test Accept and Reject Selected name each proposal by the revision the tab showed`() {
+        val digest = "9f86d081884c7d659a2feaa0c55ad015a3bf4f1b2b0b822cd15d6c15b0f00a08"
+        val shown = StatusProposal(file = ".saffron/proposals/login-saffron/sign-in.json", revision = digest)
+        // An older runner's status has no revision: the plain file, as before.
+        val older = StatusProposal(file = ".saffron/proposals/login-saffron/sign-out.json")
+        val c = newConfiguration()
+        for (command in listOf("accept", "reject")) {
+            c.command = command
+            c.paths = SaffronCommand.joinPaths(listOf(shown, older).map { it.target })
+            assertEquals(
+                listOf(command, ".saffron/proposals/login-saffron/sign-in.json#$digest", ".saffron/proposals/login-saffron/sign-out.json"),
+                SaffronCommand.arguments(c),
+            )
+        }
     }
 }

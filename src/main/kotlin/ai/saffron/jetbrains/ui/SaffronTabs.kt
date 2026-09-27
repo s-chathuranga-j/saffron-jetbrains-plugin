@@ -128,7 +128,9 @@ class ProposalsTab(project: Project, parent: Disposable) : StatusTab(project, pa
     }
 
     override fun render(status: ProjectStatus?) {
-        val ticked = ticked().map { it.file }.toSet()
+        // A tick stays with the proposal that was ticked: one a later run filed
+        // under the same name comes back unticked, unseen.
+        val ticked = ticked().map { it.target }.toSet()
         items = status?.proposals ?: emptyList()
         // The committed cache a diff was computed against may have changed
         // too (an accept, a pull), so a refresh invalidates every diff.
@@ -142,7 +144,7 @@ class ProposalsTab(project: Project, parent: Disposable) : StatusTab(project, pa
                 null -> "unchecked"
             }
             val state = if (p.stale != null) "STALE · $verified" else "${p.mode} · $verified"
-            list.addItem(p, "${p.feature.substringAfterLast('/')} › ${p.scenario}   $state", p.file in ticked)
+            list.addItem(p, "${p.feature.substringAfterLast('/')} › ${p.scenario}   $state", p.target in ticked)
         }
         if (items.isEmpty()) details.text = ""
     }
@@ -200,7 +202,7 @@ class ProposalsTab(project: Project, parent: Disposable) : StatusTab(project, pa
         }
         SaffronRunner.execute(project, "Saffron: $command ${selected.size} proposal(s)") {
             it.command = command
-            it.paths = SaffronCommand.joinPaths(selected.map { p -> p.file })
+            it.paths = SaffronCommand.joinPaths(selected.map { p -> p.target })
         }
     }
 

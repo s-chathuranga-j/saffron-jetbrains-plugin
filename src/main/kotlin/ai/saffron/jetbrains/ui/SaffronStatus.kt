@@ -56,7 +56,16 @@ class StatusProposal(
     val recordedFor: String? = null,
     val aiCalls: Int = 0,
     val costUsd: Double? = null,
-)
+    /** sha256 of the file as listed; absent from runners before 0.9.0. */
+    val revision: String? = null,
+) {
+    /**
+     * What accept and reject are given: the file bound to the revision shown,
+     * so a proposal a later run filed under the same name is refused, not
+     * decided unseen. A plain file for an older runner.
+     */
+    val target: String get() = if (revision != null) "$file#$revision" else file
+}
 
 class StatusTotals(
     val scenarios: Int = 0,
