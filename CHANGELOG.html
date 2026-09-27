@@ -1,3 +1,13 @@
+<h3>0.2.6</h3>
+<ul>
+  <li><b>Open Replay</b> in the Last Run tab runs <code>saffron trace</code> for the selected scenario, by feature and scenario name so two features with a scenario of the same name are told apart, and opens its execution replay in your browser: the steps as written, the page at every action, the network alongside. <code>trace</code> is also a run configuration command, taking a scenario name or <code>feature:scenario</code> (quotes optional); blank opens every traced scenario. Needs the next <code>saffron-ai</code> release (the one after 0.8.5), with <code>"trace": "retain-on-failure"</code> (or <code>"on"</code>) in <code>saffron.config.json</code>.</li>
+  <li><b>A screenshot stays with its run.</b> Opening one from Last Run checks it against the digest its run recorded, so a picture a later run put at the same path is refused instead of shown as this run's, and what opens is a copy of the picture that was checked, named after its scenario (<code>buy-shoes-failure.jpg</code>). The copies are kept in the IDE's own system folder and removed after a day. The digests come from the same <code>saffron-ai</code> release; with an older runner a screenshot opens unchecked, as before.</li>
+  <li>Double-clicking a row whose screenshot is gone or was replaced says so, naming the scenario, instead of jumping to the feature file over that message. The message goes when you pick another row.</li>
+</ul>
+<h3>0.2.5</h3>
+<ul>
+  <li><b>Stale proposals are marked.</b> The Proposals tab shows STALE for a proposal that can no longer be accepted as reviewed (a step edited, a colleague's heal accepted, a pull since it was filed), with the reason and what to do: run the scenario again for a fresh proposal, or reject it. A proposal filed by an older runner is noted as one whose later changes cannot be detected. Needs <code>saffron-ai</code> 0.8.5 or later.</li>
+</ul>
 <h3>0.2.4</h3>
 <ul>
   <li><code>{data:...}</code> and <code>{unique:...}</code> tokens are highlighted like <code>{env:VAR}</code>, including on an <code>Examples:</code> line. Completion of data files and keys, the value on hover, go-to-definition into the JSON and an error for a reference that does not resolve come from <code>saffron lsp</code> in the matching <code>saffron-ai</code> release.</li>

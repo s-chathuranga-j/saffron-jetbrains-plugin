@@ -3,6 +3,7 @@ package ai.saffron.jetbrains
 import ai.saffron.jetbrains.run.SaffronCommand
 import ai.saffron.jetbrains.run.SaffronConfigurationType
 import ai.saffron.jetbrains.run.SaffronRunConfiguration
+import ai.saffron.jetbrains.run.SaffronSettingsEditor
 import ai.saffron.jetbrains.ui.SaffronProjectScan
 import ai.saffron.jetbrains.ui.ProjectStatus
 import com.google.gson.Gson
@@ -11,11 +12,16 @@ import com.intellij.execution.Location
 import com.intellij.execution.RunManager
 import com.intellij.execution.actions.ConfigurationContext
 import com.intellij.execution.configurations.ConfigurationTypeUtil
+import com.intellij.execution.configurations.RuntimeConfigurationError
 import com.intellij.openapi.actionSystem.ActionPlaces
 import com.intellij.openapi.actionSystem.CommonDataKeys
 import com.intellij.openapi.actionSystem.impl.SimpleDataContext
+import com.intellij.openapi.util.Disposer
 import com.intellij.testFramework.fixtures.BasePlatformTestCase
+import com.intellij.util.ThrowableRunnable
+import com.intellij.util.ui.UIUtil
 import java.nio.file.Files
+import javax.swing.JLabel
 
 class SaffronRunConfigurationTest : BasePlatformTestCase() {
 
@@ -77,6 +83,65 @@ class SaffronRunConfigurationTest : BasePlatformTestCase() {
         // Blank paths mean every proposal: only the explicit bulk action may do this.
         c.command = "reject"; c.paths = ""
         assertEquals(listOf("reject", "--all"), SaffronCommand.arguments(c))
+    }
+
+    fun `test trace sends one scenario name, with or without the quotes the field asks for`() {
+        val c = newConfiguration()
+        c.command = "trace"
+        c.paths = ""
+        assertEquals(listOf("trace"), SaffronCommand.arguments(c))
+        // Quoted, as the tooltip says for a value with a space: the quotes are not sent along.
+        c.paths = "\"features/a.saffron:Buy shoes\""
+        assertEquals(listOf("trace", "features/a.saffron:Buy shoes"), SaffronCommand.arguments(c))
+        // Unquoted, as people type anyway: still one name.
+        c.paths = "features/a.saffron:Buy shoes"
+        assertEquals(listOf("trace", "features/a.saffron:Buy shoes"), SaffronCommand.arguments(c))
+        c.paths = "\"\""
+        assertEquals(listOf("trace"), SaffronCommand.arguments(c))
+        // Pasted as the runner lists it: the quotes in the name are the name's.
+        val name = "features/a.saffron:Search for \"red  shoes\""
+        c.paths = name
+        assertEquals(listOf("trace", name), SaffronCommand.arguments(c))
+        c.paths = "Say \"hi\""
+        assertEquals(listOf("trace", "Say \"hi\""), SaffronCommand.arguments(c))
+        // Wrapped whole, with the inner quotes escaped: unquoted once.
+        c.paths = SaffronCommand.joinPaths(listOf(name))
+        assertEquals(listOf("trace", name), SaffronCommand.arguments(c))
+        // What Open Replay writes, feature:scenario as it is, arrives as it is.
+        for (written in listOf(name, "features/a.saffron:Say\"hi\"", "features/my checkout.saffron:Buy shoes")) {
+            c.paths = written
+            assertEquals(listOf("trace", written), SaffronCommand.arguments(c))
+        }
+        // The run-only fields stay out of it.
+        c.paths = name
+        c.tags = "@smoke"; c.replayOnly = true; c.headed = true
+        assertEquals(listOf("trace", name), SaffronCommand.arguments(c))
+    }
+
+    fun `test an unknown command is told every command there is`() {
+        val c = newConfiguration()
+        c.command = "bogus"
+        assertThrows(
+            RuntimeConfigurationError::class.java,
+            "Unknown Saffron command \"bogus\"; use run, report, trace, accept, reject or prune",
+            ThrowableRunnable<Throwable> { c.checkConfiguration() },
+        )
+    }
+
+    fun `test the paths field is named for what the command reads from it`() {
+        val editor = SaffronSettingsEditor()
+        Disposer.register(testRootDisposable, editor)
+        val c = newConfiguration()
+        fun labels() = UIUtil.findComponentsOfType(editor.component, JLabel::class.java).map { it.text }
+        c.command = "trace"
+        editor.resetFrom(c)
+        assertTrue(labels().toString(), "Scenario:" in labels())
+        c.command = "reject"
+        editor.resetFrom(c)
+        assertTrue(labels().toString(), "Proposal files:" in labels())
+        c.command = "run"
+        editor.resetFrom(c)
+        assertTrue(labels().toString(), "Files or folders:" in labels())
     }
 
     fun `test the command line runs in the project directory with the saffron binary`() {
@@ -147,13 +212,17 @@ class SaffronRunConfigurationTest : BasePlatformTestCase() {
     }
 
     fun `test the status JSON from the runner maps onto the data classes`() {
+        val digest = "9f86d081884c7d659a2feaa0c55ad015a3bf4f1b2b0b822cd15d6c15b0f00a08"
         val json = """{"tool":"saffron","version":"0.5.4","packageInstalled":true,
           "config":{"file":"saffron.config.json","effective":{"baseURL":"http://x","retries":2}},
           "features":[{"path":"features/login.saffron","name":"Login","stepSets":1,
             "scenarios":[{"name":"Successful login","line":7,"tags":["@smoke"],"outline":false,"rows":1,"cached":true,"proposal":false,"lastStatus":"green"}]}],
           "tags":[{"tag":"@smoke","scenarios":1}],
           "proposals":[{"file":".saffron/proposals/login-saffron/login-errors.json","feature":"features/login.saffron","scenario":"Login errors","mode":"record","createdAt":"t","verified":true,"adaptations":[],"narrative":"n","aiCalls":5,"costUsd":1.5}],
-          "lastRun":{"startedAt":"a","finishedAt":"b","totals":{"scenarios":1,"green":1,"yellow":0,"red":0,"aiCalls":0,"costUsd":0,"plan":{"subscriptionType":"max","fiveHourBefore":18,"fiveHourAfter":20}},"reportHtml":".saffron/reports/latest.html"},
+          "lastRun":{"startedAt":"a","finishedAt":"b","totals":{"scenarios":1,"green":1,"yellow":0,"red":0,"aiCalls":0,"costUsd":0,"plan":{"subscriptionType":"max","fiveHourBefore":18,"fiveHourAfter":20}},"reportHtml":".saffron/reports/latest.html",
+            "attention":[{"feature":"features/login.saffron","scenario":"Login errors","baseScenario":"Login errors","status":"red","error":"Timed out","failedStep":"I should see the error",
+              "evidence":[{"kind":"trace","file":".saffron/artifacts/login-saffron/login-errors/trace.zip"},
+                {"kind":"failure","file":".saffron/artifacts/login-saffron/login-errors/failure.jpg","step":"I should see the error","sha256":"$digest"}]}]},
           "history":[{"startedAt":"a","green":1,"yellow":0,"red":0,"aiCalls":0,"costUsd":0}],
           "vocabulary":{"steps":3,"recorded":2,"unrecorded":1,"stepSets":1,"divergent":["x"],"duplicateWordings":[{"steps":["p","q"],"actions":"goto /"}]}}"""
         val s = Gson().fromJson(json, ProjectStatus::class.java)
@@ -167,5 +236,13 @@ class SaffronRunConfigurationTest : BasePlatformTestCase() {
         assertEquals("x", s.vocabulary.divergent[0])
         assertEquals(listOf("p", "q"), s.vocabulary.duplicateWordings[0].steps)
         assertEquals("http://x", s.config.effective.get("baseURL").asString)
+        val attention = s.lastRun.attention!!.single()
+        assertEquals("I should see the error", attention.failedStep)
+        assertEquals(listOf("trace", "failure"), attention.evidence.map { it.kind })
+        assertNull(attention.evidence[0].sha256)
+        // The screenshot check trusts a picture with no digest, so a renamed
+        // field would switch it off without anything else failing.
+        assertEquals(digest, attention.evidence[1].sha256)
+        assertEquals("I should see the error", attention.evidence[1].step)
     }
 }

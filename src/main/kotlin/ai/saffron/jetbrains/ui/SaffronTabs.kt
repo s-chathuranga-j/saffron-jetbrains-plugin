@@ -47,15 +47,23 @@ abstract class StatusTab(protected val project: Project, parent: Disposable) : S
         service.refresh()
     }
 
+    /** What the status says about itself (unavailable, not installed); a tab's own messages give way to it. */
+    private var statusNote = ""
+
     private fun onStatus(load: StatusLoad) {
         val status = load.status
-        if (status == null) {
-            note.text = load.error?.let { "Status unavailable: $it" } ?: "Loading…"
-            render(null)
-            return
+        statusNote = when {
+            status == null -> load.error?.let { "Status unavailable: $it" } ?: "Loading…"
+            status.packageInstalled -> ""
+            else -> "saffron-ai is not installed here (npm i -D saffron-ai); status came from npx."
         }
-        note.text = if (status.packageInstalled) "" else "saffron-ai is not installed here (npm i -D saffron-ai); status came from npx."
+        note.text = statusNote
         render(status)
+    }
+
+    /** Takes down a tab's own message once it no longer applies, putting the status's note back. */
+    protected fun clearNote() {
+        note.text = statusNote
     }
 
     protected abstract fun render(status: ProjectStatus?)

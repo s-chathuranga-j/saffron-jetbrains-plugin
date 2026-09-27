@@ -7,6 +7,7 @@ import com.intellij.execution.configurations.GeneralCommandLine
 import com.intellij.execution.util.ExecUtil
 import com.intellij.openapi.Disposable
 import com.intellij.openapi.application.ApplicationManager
+import com.intellij.openapi.application.PathManager
 import com.intellij.openapi.components.Service
 import com.intellij.openapi.project.Project
 import com.intellij.util.Alarm
@@ -70,7 +71,49 @@ class StatusTotals(
 
 class StatusPlan(val subscriptionType: String = "", val fiveHourBefore: Double? = null, val fiveHourAfter: Double? = null)
 
-class StatusEvidence(val kind: String = "failure", val file: String = "", val step: String? = null)
+/** sha256: the digest of the file that run wrote; absent from runners before digests. */
+class StatusEvidence(val kind: String = "failure", val file: String = "", val step: String? = null, val sha256: String? = null)
+
+/**
+ * The evidence file's bytes if they are still the ones that run wrote. The
+ * artifact paths are fixed, so a later run (in a terminal, in CI) replaces
+ * the file behind a row still on screen. Null when the file is gone or replaced.
+ */
+fun currentEvidence(file: java.io.File, sha256: String?): ByteArray? {
+    val bytes = try { file.readBytes() } catch (e: java.io.IOException) { return null }
+    if (sha256 == null) return bytes
+    val digest = java.security.MessageDigest.getInstance("SHA-256").digest(bytes).joinToString("") { "%02x".format(it) }
+    return if (digest == sha256) bytes else null
+}
+
+/**
+ * Where the checked copies go: this IDE's own per-user system folder. A temp
+ * folder is shared by every user of a Linux machine, and nothing cleans it.
+ */
+fun evidenceCopies(): java.io.File = PathManager.getSystemDir().resolve("saffron-evidence").toFile()
+
+private const val COPY_LIFETIME_MS = 24 * 60 * 60 * 1000L
+
+/**
+ * The checked bytes in a file of their own: what the editor opens, so a run
+ * writing the original between the check and the editor's read cannot put
+ * its picture in this row. One folder per digest. Every picture is named
+ * failure.jpg or before-heal.jpg, so the copy takes its scenario folder's
+ * name too (buy-shoes-failure.jpg), for the editor tab to say whose it is.
+ * Copies untouched for a day are removed.
+ */
+fun checkedCopy(bytes: ByteArray, sha256: String, original: java.io.File, root: java.io.File = evidenceCopies()): java.io.File {
+    val dir = java.io.File(root, sha256.take(16))
+    // Throws with the reason, where File.mkdirs() would only say false.
+    java.nio.file.Files.createDirectories(dir.toPath())
+    // Touched first, so another open pruning at the same moment keeps it.
+    val now = System.currentTimeMillis()
+    dir.setLastModified(now)
+    val copy = java.io.File(dir, listOfNotNull(original.parentFile?.name, original.name).joinToString("-"))
+    copy.writeBytes(bytes)
+    root.listFiles()?.filter { it != dir && it.lastModified() < now - COPY_LIFETIME_MS }?.forEach { it.deleteRecursively() }
+    return copy
+}
 
 /** A scenario of the last run that was not green, with the screenshots taken. */
 class StatusAttention(

@@ -12,8 +12,9 @@ import com.intellij.openapi.project.Project
 
 /**
  * A Saffron run configuration: `saffron run` over files, folders and tags
- * (with replay-only, headed and re-record switches), `saffron report`, or
- * `saffron accept --all`. Output goes to the Run tool window.
+ * (with replay-only, headed and re-record switches), `saffron report`,
+ * `saffron trace` for a scenario, `saffron accept` or `reject`, or
+ * `saffron prune`. Output goes to the Run tool window.
  */
 class SaffronRunConfiguration(project: Project, factory: ConfigurationFactory, name: String) :
     LocatableConfigurationBase<SaffronRunOptions>(project, factory, name) {
@@ -55,7 +56,9 @@ class SaffronRunConfiguration(project: Project, factory: ConfigurationFactory, n
 
     override fun checkConfiguration() {
         if (command !in SaffronCommand.COMMANDS) {
-            throw RuntimeConfigurationError("Unknown Saffron command \"$command\"; use run, report, accept or reject")
+            // From the list itself, so a command added there is never left out here.
+            val known = SaffronCommand.COMMANDS
+            throw RuntimeConfigurationError("Unknown Saffron command \"$command\"; use ${known.dropLast(1).joinToString(", ")} or ${known.last()}")
         }
         if (project.basePath == null) throw RuntimeConfigurationError("The project has no directory to run in")
     }

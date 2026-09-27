@@ -3,10 +3,13 @@ package ai.saffron.jetbrains.ui
 import ai.saffron.jetbrains.run.SaffronRunner
 import com.intellij.icons.AllIcons
 import com.intellij.openapi.Disposable
+import com.intellij.openapi.application.ApplicationManager
 import com.intellij.openapi.fileEditor.FileEditorManager
 import com.intellij.openapi.fileEditor.OpenFileDescriptor
 import com.intellij.openapi.project.Project
 import com.intellij.openapi.vfs.LocalFileSystem
+import com.intellij.openapi.vfs.VfsUtil
+import com.intellij.openapi.vfs.VirtualFile
 import com.intellij.ui.ColoredTreeCellRenderer
 import com.intellij.ui.DoubleClickListener
 import com.intellij.ui.SimpleTextAttributes
@@ -20,6 +23,37 @@ import javax.swing.JPanel
 import javax.swing.JTree
 import javax.swing.tree.DefaultMutableTreeNode
 import javax.swing.tree.DefaultTreeModel
+
+/** What opening a row's screenshot comes to: the file to show, or why there is none. */
+internal class Screenshot(val file: VirtualFile? = null, val problem: String? = null)
+
+/**
+ * Reads, checks and copies a row's picture, then finds the copy in the VFS.
+ * Disk work that takes long enough on a WSL path or a network share, with a
+ * full-page picture, to freeze the IDE, so it is never run on the UI thread.
+ */
+internal fun screenshotToShow(base: String, shot: StatusEvidence, scenario: String): Screenshot {
+    val file = java.io.File(base, shot.file)
+    if (!file.isFile) return Screenshot(problem = "The screenshot of \"$scenario\" is gone. Screenshots are kept for the latest run only.")
+    val bytes = currentEvidence(file, shot.sha256)
+        ?: return Screenshot(problem = "A later run replaced the screenshot of \"$scenario\". Refresh to see its results.")
+    // The checked bytes, not the path: a run writing the file between the
+    // check and the editor's own read would otherwise still be shown. A
+    // runner before digests has nothing to check against, so the path opens
+    // as it is.
+    val shown = shot.sha256?.let { sha ->
+        try {
+            checkedCopy(bytes, sha, file)
+        } catch (e: java.io.IOException) {
+            return Screenshot(problem = "Could not prepare the screenshot of \"$scenario\" for viewing: ${e.message}")
+        }
+    } ?: file
+    val vf = LocalFileSystem.getInstance().refreshAndFindFileByIoFile(shown) ?: return Screenshot()
+    // The editor reads the IDE's copy of the file, which can still hold
+    // an earlier picture at this path. Bring it up to date.
+    VfsUtil.markDirtyAndRefresh(false, false, false, vf)
+    return Screenshot(file = vf)
+}
 
 private class RunRow(
     val label: String,
@@ -65,8 +99,15 @@ class LastRunTab(project: Project, parent: Disposable) : StatusTab(project, pare
         )
         tree.emptyText.text = "Loading…"
         object : DoubleClickListener() {
-            override fun onDoubleClick(event: MouseEvent): Boolean = openScreenshot() || openScenario()
+            // The scenario only when there is no picture: a picture that is
+            // gone or replaced says so on the note, and jumping away would hide it.
+            override fun onDoubleClick(event: MouseEvent): Boolean {
+                val a = selected() ?: return false
+                return if (a.evidence.any { it.kind != "trace" }) openScreenshot() else openScenario()
+            }
         }.installOn(tree)
+        // A message about one row must not sit above another.
+        tree.addTreeSelectionListener { clearNote() }
         setContent(JPanel(BorderLayout()).apply {
             add(note, BorderLayout.NORTH)
             add(JBScrollPane(tree), BorderLayout.CENTER)
@@ -125,27 +166,39 @@ class LastRunTab(project: Project, parent: Disposable) : StatusTab(project, pare
     private fun openReplay(): Boolean {
         val a = selected() ?: return false
         if (a.evidence.none { it.kind == "trace" }) {
-            note.text = "No execution trace for this scenario. Set \"trace\": \"retain-on-failure\" in saffron.config.json and run again."
+            // An older runner has no trace setting, so following the second
+            // half alone would bring this same message back.
+            note.text = "No execution trace for \"${a.scenario}\". Open Replay needs saffron-ai newer than 0.8.5, with \"trace\": \"retain-on-failure\" in saffron.config.json; then run again."
             return false
         }
+        clearNote()
         SaffronRunner.execute(project, "Saffron: replay") {
             it.command = "trace"
-            it.paths = a.scenario
+            // feature:scenario, so two features with a scenario of the same
+            // name are told apart. Written as it is: it starts with the
+            // feature path, never a quote, so the field takes it whole,
+            // quotes and spacing in the name included.
+            it.paths = "${a.feature}:${a.scenario}"
             it.extraArgs = ""
         }
         return true
     }
 
     private fun openScreenshot(): Boolean {
+        val a = selected() ?: return false
         // A trace is not a picture; the pictures come first, the replay has its own action.
-        val shot = selected()?.evidence?.firstOrNull { it.kind != "trace" } ?: return false
+        val shot = a.evidence.firstOrNull { it.kind != "trace" } ?: return false
         val base = project.basePath ?: return false
-        val vf = LocalFileSystem.getInstance().refreshAndFindFileByPath("$base/${shot.file}")
-        if (vf == null) {
-            note.text = "That screenshot is gone. Screenshots are kept for the latest run only."
-            return false
+        clearNote()
+        val app = ApplicationManager.getApplication()
+        app.executeOnPooledThread {
+            val result = screenshotToShow(base, shot, a.scenario)
+            app.invokeLater({
+                // Names its scenario: the selection may have moved on meanwhile.
+                result.problem?.let { note.text = it }
+                result.file?.let { FileEditorManager.getInstance(project).openFile(it, true) }
+            }, project.disposed)
         }
-        FileEditorManager.getInstance(project).openFile(vf, true)
         return true
     }
 
@@ -155,6 +208,7 @@ class LastRunTab(project: Project, parent: Disposable) : StatusTab(project, pare
         val vf = LocalFileSystem.getInstance().refreshAndFindFileByPath("$base/${a.feature}") ?: return false
         val line = features.firstOrNull { it.path == a.feature }?.scenarios?.firstOrNull { it.name == a.baseScenario }?.line
         OpenFileDescriptor(project, vf, ((line ?: 1) - 1).coerceAtLeast(0), 0).navigate(true)
+        clearNote()
         return true
     }
 }

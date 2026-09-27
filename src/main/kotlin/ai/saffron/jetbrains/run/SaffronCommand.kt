@@ -42,18 +42,18 @@ object SaffronCommand {
         val args = mutableListOf<String>()
         when (c.command) {
             "report" -> args += "report"
-            // The execution replay of one scenario: Files or folders holds
-            // the scenario name (or feature:scenario); blank picks the one
-            // failed scenario with a trace.
+            // The execution replay: the field holds one scenario name (or
+            // feature:scenario). Blank opens every traced scenario, starting
+            // on a failed one.
             "trace" -> {
                 args += "trace"
-                if (c.paths.isNotBlank()) args += c.paths.trim()
+                traceName(c.paths)?.let { args += it }
             }
             // Listing is the safe default; the tool window adds --yes through
             // extra arguments after asking.
             "prune" -> args += "prune"
             "accept", "reject" -> {
-                // Files or folders holds proposal files here; blank means every proposal.
+                // The field holds proposal files here; blank means every proposal.
                 args += c.command
                 val files = splitPaths(c.paths)
                 if (files.isEmpty()) args += "--all" else args += files
@@ -90,4 +90,18 @@ object SaffronCommand {
 
     /** The inverse: what the plugin writes when IT fills the field. */
     fun joinPaths(paths: List<String>): String = ParametersListUtil.join(paths)
+
+    /**
+     * The scenario a trace field names; null when blank. A value wrapped
+     * whole in double quotes, as the tooltip says for one with a space, is
+     * unquoted. Any other value is the name as typed: split into words, a
+     * name the runner lists as `Search for "red shoes"` would lose its
+     * quotes and match nothing.
+     */
+    fun traceName(field: String): String? {
+        val typed = field.trim()
+        val parsed = ParametersListUtil.parse(typed)
+        val name = if (typed.startsWith('"') && parsed.size == 1) parsed[0] else typed
+        return name.ifBlank { null }
+    }
 }
