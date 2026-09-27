@@ -1,0 +1,3 @@
+<idea-plugin>
+    <!-- Nothing to register: the dependency only makes JCEF visible to the Dashboard. -->
+</idea-plugin>

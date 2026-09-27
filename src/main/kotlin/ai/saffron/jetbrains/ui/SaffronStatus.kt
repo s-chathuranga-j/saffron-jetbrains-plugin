@@ -251,3 +251,12 @@ class SaffronStatusService(private val project: Project) : Disposable {
         }
     }
 }
+
+/** Whether a runner version ("0.9.1", "0.10.0-beta.1") is at least major.minor.patch. */
+fun runnerAtLeast(version: String, major: Int, minor: Int, patch: Int): Boolean {
+    val parts = version.split('.', '-').take(3).map { it.toIntOrNull() ?: 0 }
+    val have = listOf(parts.getOrElse(0) { 0 }, parts.getOrElse(1) { 0 }, parts.getOrElse(2) { 0 })
+    val want = listOf(major, minor, patch)
+    for (i in 0..2) if (have[i] != want[i]) return have[i] > want[i]
+    return true
+}

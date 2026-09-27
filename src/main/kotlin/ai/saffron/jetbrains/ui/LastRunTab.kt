@@ -76,6 +76,8 @@ class LastRunTab(project: Project, parent: Disposable) : StatusTab(project, pare
     private val root = DefaultMutableTreeNode(RunRow("Saffron"))
     private val model = DefaultTreeModel(root)
     private var features: List<StatusFeature> = emptyList()
+    /** When the listed run started: Open Replay names it, so a later run is not opened in its place. */
+    private var shownRun: String? = null
     private val tree = Tree(model).apply {
         isRootVisible = false
         showsRootHandles = true
@@ -119,6 +121,8 @@ class LastRunTab(project: Project, parent: Disposable) : StatusTab(project, pare
         root.removeAllChildren()
         features = status?.features ?: emptyList()
         val run = status?.lastRun
+        // Runners before 0.9.1 have no --run and would refuse the command itself.
+        shownRun = run?.startedAt?.takeIf { it.isNotBlank() && runnerAtLeast(status?.version ?: "", 0, 9, 1) }
         val attention = run?.attention
         tree.emptyText.text = when {
             status == null -> "Loading…"
@@ -179,7 +183,8 @@ class LastRunTab(project: Project, parent: Disposable) : StatusTab(project, pare
             // feature path, never a quote, so the field takes it whole,
             // quotes and spacing in the name included.
             it.paths = "${a.feature}:${a.scenario}"
-            it.extraArgs = ""
+            // The run these rows list: the replay refuses a later one.
+            it.extraArgs = shownRun?.let { run -> "--run $run" } ?: ""
         }
         return true
     }

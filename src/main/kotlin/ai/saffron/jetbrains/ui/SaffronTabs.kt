@@ -297,7 +297,13 @@ class TagsTab(project: Project, parent: Disposable) : StatusTab(project, parent)
 /** The HTML report, embedded. */
 class DashboardTab(project: Project, parent: Disposable) : StatusTab(project, parent) {
 
-    private val browser: JBCefBrowser? = if (JBCefApp.isSupported()) JBCefBrowser() else null
+    // An IDE whose JCEF classes this plugin cannot load (not installed, or
+    // not visible to it) gets the placeholder and Open in Browser, not a crash.
+    private val browser: JBCefBrowser? = try {
+        if (JBCefApp.isSupported()) JBCefBrowser() else null
+    } catch (e: LinkageError) {
+        null
+    }
     private val placeholder = JBLabel("", JBLabel.CENTER)
     private var reportPath: Path? = null
 

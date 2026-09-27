@@ -1,3 +1,8 @@
+<h3>0.3.1</h3>
+<ul>
+  <li><b>The tool window opens on IntelliJ 2026.2.</b> The Dashboard tab no longer fails with NoClassDefFoundError (JBCefApp): 2026.2 moved the embedded browser into its own plugin, which Saffron now depends on where it exists. Without it the Dashboard offers Open in Browser.</li>
+  <li><b>Open Replay opens the run its row lists.</b> A row shown for one run no longer opens a later run's trace; the runner refuses it and says to refresh. Needs <code>saffron-ai</code> 0.9.1 or later; with an older runner it opens the scenario as before.</li>
+</ul>
 <h3>0.3.0</h3>
 <ul>
   <li><b>Open Replay</b> in the Last Run tab runs <code>saffron trace</code> for the selected scenario, by feature and scenario name so two features with a scenario of the same name are told apart, and opens its execution replay in your browser: the steps as written, the page at every action, the network alongside. <code>trace</code> is also a run configuration command, taking a scenario name or <code>feature:scenario</code> (quotes optional); blank opens every traced scenario. Needs <code>saffron-ai</code> 0.9.0 or later, with <code>"trace": "retain-on-failure"</code> (or <code>"on"</code>) in <code>saffron.config.json</code>.</li>

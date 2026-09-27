@@ -12,6 +12,11 @@
          would otherwise refuse the whole plugin. With LSP4IJ installed, the
          language server below is registered; without it, everything else works. -->
     <depends optional="true" config-file="saffron-lsp4ij.xml">com.redhat.devtools.lsp4ij</depends>
+    <!-- The Dashboard's embedded browser. From 2026.2 JCEF is its own bundled
+         plugin, whose classes a plugin sees only by depending on it; before
+         that it is part of the platform and this is ignored. Optional: an IDE
+         without it still gets the Dashboard, with Open in Browser. -->
+    <depends optional="true" config-file="saffron-jcef.xml">com.intellij.modules.jcef</depends>
 
     <extensions defaultExtensionNs="com.intellij">
         <!-- .saffron is a Saffron file: icon + registration; colors come from the

@@ -252,4 +252,12 @@ class SaffronPluginTest : BasePlatformTestCase() {
             made.forEach { it.toFile().deleteRecursively() }
         }
     }
+
+    fun `test Open Replay names its run only to a runner that knows the option`() {
+        assertTrue(ai.saffron.jetbrains.ui.runnerAtLeast("0.9.1", 0, 9, 1))
+        assertTrue(ai.saffron.jetbrains.ui.runnerAtLeast("0.10.0-beta.1", 0, 9, 1))
+        assertTrue(ai.saffron.jetbrains.ui.runnerAtLeast("1.0.0", 0, 9, 1))
+        assertFalse(ai.saffron.jetbrains.ui.runnerAtLeast("0.9.0", 0, 9, 1))
+        assertFalse(ai.saffron.jetbrains.ui.runnerAtLeast("", 0, 9, 1))
+    }
 }
