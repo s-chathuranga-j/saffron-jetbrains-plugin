@@ -15,7 +15,8 @@ data class SaffronFile(val relativePath: String, val scenarios: Int, val stepSet
 }
 
 /** Totals of the latest run, from `.saffron/reports/latest.json`. */
-data class LastRun(val green: Int, val yellow: Int, val red: Int, val costUsd: Double, val finishedAt: Instant?)
+/** [costUsd] is null when the provider reports no price (Codex, Antigravity, Cursor): never a measured $0. */
+data class LastRun(val green: Int, val yellow: Int, val red: Int, val costUsd: Double?, val finishedAt: Instant?)
 
 data class SaffronProjectState(
     val files: List<SaffronFile>,
@@ -93,7 +94,8 @@ object SaffronProjectScan {
                 green = t.get("green").asInt,
                 yellow = t.get("yellow").asInt,
                 red = t.get("red").asInt,
-                costUsd = t.get("costUsd")?.asDouble ?: 0.0,
+                // The runner's rule: AI work with no dollar figure is "not reported".
+                costUsd = (t.get("costUsd")?.asDouble ?: 0.0).takeIf { it > 0 || (t.get("aiCalls")?.asInt ?: 0) == 0 },
                 finishedAt = root.get("finishedAt")?.asString?.let { runCatching { Instant.parse(it) }.getOrNull() },
             )
         }.getOrNull()

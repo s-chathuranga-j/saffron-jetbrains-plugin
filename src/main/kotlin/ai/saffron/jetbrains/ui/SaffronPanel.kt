@@ -186,7 +186,8 @@ class SaffronPanel(private val project: Project, parent: Disposable) : SimpleToo
         all = s.files
         applyFilter(checked)
         status.text = s.lastRun?.let { r ->
-            "Last run: ${r.green} passed · ${r.yellow} pending review · ${r.red} failed · $${"%.2f".format(r.costUsd)}${ago(r.finishedAt)}"
+            val cost = r.costUsd?.let { "$" + "%.2f".format(it) } ?: "cost not reported"
+            "Last run: ${r.green} passed · ${r.yellow} pending review · ${r.red} failed · $cost${ago(r.finishedAt)}"
         } ?: "No runs yet."
         pending.text = when (s.pendingProposals) {
             0 -> "No proposals pending review."
