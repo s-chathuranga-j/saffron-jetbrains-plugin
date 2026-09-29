@@ -253,7 +253,7 @@ class TagsTab(project: Project, parent: Disposable) : StatusTab(project, parent)
 
     init {
         toolbar = toolbar(
-            action("Run Tagged", "saffron run --filter <ticked tags> (any of them)", AllIcons.Actions.Execute) { run() },
+            action("Run Tagged", "saffron run --filter <ticked tags> (any of them; the CLI also takes \"@a and not @b\")", AllIcons.Actions.Execute) { run() },
             action("Refresh", "Reload the status", AllIcons.Actions.Refresh) { refreshStatus() },
         )
         list.setEmptyText("No @tags in the feature files")
