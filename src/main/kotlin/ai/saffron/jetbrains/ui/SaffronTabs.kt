@@ -15,6 +15,9 @@ import com.intellij.openapi.project.DumbAwareAction
 import com.intellij.openapi.project.Project
 import com.intellij.openapi.ui.SimpleToolWindowPanel
 import com.intellij.ui.CheckBoxList
+import com.intellij.ui.ColoredListCellRenderer
+import com.intellij.ui.SimpleTextAttributes
+import com.intellij.ui.components.JBList
 import com.intellij.ui.components.JBCheckBox
 import com.intellij.ui.components.JBLabel
 import com.intellij.ui.components.JBScrollPane
@@ -23,11 +26,17 @@ import com.intellij.ui.jcef.JBCefApp
 import com.intellij.ui.jcef.JBCefBrowser
 import com.intellij.util.ui.JBUI
 import com.intellij.util.ui.UIUtil
+import org.cef.browser.CefBrowser
+import org.cef.browser.CefFrame
+import org.cef.handler.CefLifeSpanHandlerAdapter
+import org.cef.handler.CefRequestHandlerAdapter
+import org.cef.network.CefRequest
 import java.awt.BorderLayout
 import java.nio.file.Files
 import java.nio.file.Path
 import javax.swing.BoxLayout
 import javax.swing.Icon
+import javax.swing.JList
 import javax.swing.JPanel
 import javax.swing.JSplitPane
 
@@ -53,6 +62,7 @@ abstract class StatusTab(protected val project: Project, parent: Disposable) : S
     private fun onStatus(load: StatusLoad) {
         val status = load.status
         statusNote = when {
+            status == null && load.error == SaffronStatusService.UNTRUSTED -> load.error
             status == null -> load.error?.let { "Status unavailable: $it" } ?: "Loading…"
             status.packageInstalled -> ""
             else -> "saffron-ai is not installed here (npm i -D saffron-ai); status came from npx."
@@ -80,12 +90,27 @@ abstract class StatusTab(protected val project: Project, parent: Disposable) : S
     }
 
     protected fun refreshStatus() = SaffronStatusService.getInstance(project).refresh()
+
+    /** The Saffron project the tabs show. */
+    protected val projectRoot: Path get() = SaffronStatusService.getInstance(project).root
 }
 
 /** Pending proposals: tick, read the narrative, accept or reject. */
 class ProposalsTab(project: Project, parent: Disposable) : StatusTab(project, parent) {
 
     private val list = CheckBoxList<StatusProposal>()
+    /** Proposal files the runner could not read: not decidable here, shown with the reason. */
+    private val unreadable = JBList<UnreadableProposal>().apply {
+        cellRenderer = object : ColoredListCellRenderer<UnreadableProposal>() {
+            override fun customizeCellRenderer(list: JList<out UnreadableProposal>, value: UnreadableProposal, index: Int, selected: Boolean, hasFocus: Boolean) {
+                icon = AllIcons.General.Warning
+                append(value.file)
+                append("  ${value.problem}", SimpleTextAttributes.GRAYED_ATTRIBUTES)
+                toolTipText = "${value.file}\n${value.problem}"
+            }
+        }
+        isVisible = false
+    }
     private val details = JBTextArea().apply { isEditable = false; lineWrap = true; wrapStyleWord = true; border = JBUI.Borders.empty(6) }
     private var items: List<StatusProposal> = emptyList()
     /**
@@ -121,13 +146,16 @@ class ProposalsTab(project: Project, parent: Disposable) : StatusTab(project, pa
             border = null
         }
         setContent(JPanel(BorderLayout()).apply {
-            add(note, BorderLayout.NORTH)
+            add(JPanel(BorderLayout()).apply { add(note, BorderLayout.NORTH); add(unreadable, BorderLayout.CENTER) }, BorderLayout.NORTH)
             add(split, BorderLayout.CENTER)
         })
         start()
     }
 
     override fun render(status: ProjectStatus?) {
+        val broken = status?.unreadableProposals ?: emptyList()
+        unreadable.setListData(broken.toTypedArray())
+        unreadable.isVisible = broken.isNotEmpty()
         // A tick stays with the proposal that was ticked: one a later run filed
         // under the same name comes back unticked, unseen.
         val ticked = ticked().map { it.target }.toSet()
@@ -163,7 +191,7 @@ class ProposalsTab(project: Project, parent: Disposable) : StatusTab(project, pa
             details.caretPosition = 0
             return
         }
-        val base = project.basePath ?: return
+        val base = projectRoot.toString()
         val loadedFor = generation
         ApplicationManager.getApplication().executeOnPooledThread {
             val text = try {
@@ -306,13 +334,18 @@ class DashboardTab(project: Project, parent: Disposable) : StatusTab(project, pa
     }
     private val placeholder = JBLabel("", JBLabel.CENTER)
     private var reportPath: Path? = null
+    /** The report and its modification time as last loaded: an unchanged one is not reloaded on every status refresh. */
+    private var loaded: Pair<Path, java.nio.file.attribute.FileTime>? = null
 
     init {
         toolbar = toolbar(
             action("Reload", "Reload the report", AllIcons.Actions.Refresh) { refreshStatus() },
             action("Open in Browser", "Open the report in the system browser", AllIcons.Nodes.PpWeb) { reportPath?.let { BrowserUtil.browse(it.toUri()) } },
         )
-        browser?.let { com.intellij.openapi.util.Disposer.register(parent, it) }
+        browser?.let {
+            com.intellij.openapi.util.Disposer.register(parent, it)
+            keepToReport(it)
+        }
         setContent(JPanel(BorderLayout()).apply {
             add(note, BorderLayout.NORTH)
             add(browser?.component ?: placeholder, BorderLayout.CENTER)
@@ -321,9 +354,8 @@ class DashboardTab(project: Project, parent: Disposable) : StatusTab(project, pa
     }
 
     override fun render(status: ProjectStatus?) {
-        val base = project.basePath
         val rel = status?.lastRun?.reportHtml
-        val path = if (base != null && rel != null) Path.of(base, rel) else null
+        val path = rel?.let { projectRoot.resolve(it) }
         reportPath = path?.takeIf { Files.exists(it) }
         val b = browser
         if (b == null) {
@@ -331,10 +363,39 @@ class DashboardTab(project: Project, parent: Disposable) : StatusTab(project, pa
             return
         }
         val target = reportPath
+        val stamp = target?.let { runCatching { Files.getLastModifiedTime(it) }.getOrNull() }?.let { target to it }
+        if (stamp != null && stamp == loaded) return
+        loaded = stamp
         if (target == null) {
             b.loadHTML("<html><body style=\"font-family:sans-serif;color:#888;padding:24px\">No report yet. Run a feature file and the report appears here.</body></html>")
         } else {
             b.loadURL(target.toUri().toString())
         }
+    }
+
+    /**
+     * The panel shows the report and nothing else: web links open in the
+     * system browser, popups too, and any other navigation is cancelled.
+     */
+    private fun keepToReport(b: JBCefBrowser) {
+        fun allowed(url: String): Boolean {
+            if (url.startsWith("http://", true) || url.startsWith("https://", true)) {
+                BrowserUtil.browse(url)
+                return false
+            }
+            val reports = projectRoot.resolve(".saffron").toUri().toString()
+            // loadHTML's own page, and the report's files and anchors.
+            return url.startsWith(reports) || url.startsWith("file:///jbcefbrowser/") || url.startsWith("about:") || url.startsWith("data:")
+        }
+        b.jbCefClient.addRequestHandler(object : CefRequestHandlerAdapter() {
+            override fun onBeforeBrowse(browser: CefBrowser?, frame: CefFrame?, request: CefRequest, userGesture: Boolean, isRedirect: Boolean): Boolean =
+                !allowed(request.url)
+        }, b.cefBrowser)
+        b.jbCefClient.addLifeSpanHandler(object : CefLifeSpanHandlerAdapter() {
+            override fun onBeforePopup(browser: CefBrowser?, frame: CefFrame?, targetUrl: String?, targetFrameName: String?): Boolean {
+                targetUrl?.let(::allowed)
+                return true
+            }
+        }, b.cefBrowser)
     }
 }

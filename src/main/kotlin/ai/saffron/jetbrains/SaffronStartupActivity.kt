@@ -1,5 +1,6 @@
 package ai.saffron.jetbrains
 
+import ai.saffron.jetbrains.ui.SaffronRoots
 import com.intellij.ide.util.PropertiesComponent
 import com.intellij.notification.NotificationGroupManager
 import com.intellij.notification.NotificationType
@@ -16,7 +17,8 @@ import java.nio.file.Path
 class SaffronStartupActivity : ProjectActivity {
     override suspend fun execute(project: Project) {
         val base = project.basePath?.let(Path::of) ?: return
-        if (!Files.exists(base.resolve("saffron.config.json"))) return
+        val roots = SaffronRoots.discover(base).filter { Files.exists(it.resolve("saffron.config.json")) }
+        if (roots.isEmpty()) return
 
         // LSP4IJ is an optional dependency: without it the plugin still loads,
         // but there is no completion, go-to-definition or diagnostics. Say so
@@ -33,7 +35,7 @@ class SaffronStartupActivity : ProjectActivity {
             )
             return
         }
-        if (!Files.isDirectory(base.resolve("node_modules/saffron-ai"))) {
+        if (roots.none { Files.isDirectory(it.resolve("node_modules/saffron-ai")) }) {
             hintOnce(
                 project,
                 HINT_SHOWN_KEY,

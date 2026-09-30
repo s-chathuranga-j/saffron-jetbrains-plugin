@@ -193,7 +193,7 @@ class LastRunTab(project: Project, parent: Disposable) : StatusTab(project, pare
         val a = selected() ?: return false
         // A trace is not a picture; the pictures come first, the replay has its own action.
         val shot = a.evidence.firstOrNull { it.kind != "trace" } ?: return false
-        val base = project.basePath ?: return false
+        val base = projectRoot.toString()
         clearNote()
         val app = ApplicationManager.getApplication()
         app.executeOnPooledThread {
@@ -209,8 +209,7 @@ class LastRunTab(project: Project, parent: Disposable) : StatusTab(project, pare
 
     private fun openScenario(): Boolean {
         val a = selected() ?: return false
-        val base = project.basePath ?: return false
-        val vf = LocalFileSystem.getInstance().refreshAndFindFileByPath("$base/${a.feature}") ?: return false
+        val vf = LocalFileSystem.getInstance().refreshAndFindFileByNioFile(projectRoot.resolve(a.feature)) ?: return false
         val line = features.firstOrNull { it.path == a.feature }?.scenarios?.firstOrNull { it.name == a.baseScenario }?.line
         OpenFileDescriptor(project, vf, ((line ?: 1) - 1).coerceAtLeast(0), 0).navigate(true)
         clearNote()

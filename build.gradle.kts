@@ -59,6 +59,8 @@ intellijPlatform {
     pluginVerification {
         ides {
             recommended()
+            // 253+ explicitly: the unified IntelliJ IDEA distribution, where JCEF is its own plugin.
+            create(org.jetbrains.intellij.platform.gradle.IntelliJPlatformType.IntellijIdea, "2026.2")
             // ./gradlew verifyPlugin -PlocalIde="/path/to/IntelliJ IDEA.app" checks the IDE you actually use.
             providers.gradleProperty("localIde").orNull?.let { local(it) }
         }

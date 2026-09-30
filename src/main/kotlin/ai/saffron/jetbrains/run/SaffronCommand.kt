@@ -1,6 +1,8 @@
 package ai.saffron.jetbrains.run
 
 import com.intellij.execution.configurations.GeneralCommandLine
+import com.intellij.ide.impl.isTrusted
+import com.intellij.openapi.project.Project
 import com.intellij.openapi.util.SystemInfo
 import com.intellij.util.execution.ParametersListUtil
 import java.nio.file.Files
@@ -13,7 +15,10 @@ import java.nio.file.Path
  */
 object SaffronCommand {
 
-    val COMMANDS: List<String> = listOf("run", "report", "trace", "accept", "reject", "prune")
+    val COMMANDS: List<String> = listOf("run", "report", "trace", "accept", "reject", "prune", "login")
+
+    /** Nothing is spawned for a project the user has not trusted: its node_modules and config are its own code. */
+    fun trusted(project: Project): Boolean = project.isTrusted()
 
     fun localBinary(basePath: String?): Path? {
         val p = basePath?.let { Path.of(it, "node_modules", ".bin", if (SystemInfo.isWindows) "saffron.cmd" else "saffron") }
@@ -21,8 +26,7 @@ object SaffronCommand {
     }
 
     /** `saffron` with no sub-command yet; working directory = the project. */
-    fun base(basePath: String?): GeneralCommandLine {
-        val local = localBinary(basePath)
+    fun base(basePath: String?, local: Path? = localBinary(basePath)): GeneralCommandLine {
         val command = if (local != null) {
             GeneralCommandLine(local.toString())
         } else {
@@ -52,6 +56,11 @@ object SaffronCommand {
             // Listing is the safe default; the tool window adds --yes through
             // extra arguments after asking.
             "prune" -> args += "prune"
+            // The field holds the provider; blank checks the configured one.
+            "login" -> {
+                args += "login"
+                c.paths.trim().takeIf { it.isNotEmpty() }?.let { args += it }
+            }
             "accept", "reject" -> {
                 // The field holds proposal files here; blank means every proposal.
                 args += c.command
@@ -72,7 +81,7 @@ object SaffronCommand {
     }
 
     fun forConfiguration(c: SaffronRunConfiguration): GeneralCommandLine =
-        base(c.project.basePath).withParameters(arguments(c))
+        base(c.workingDirectory ?: c.project.basePath).withParameters(arguments(c))
 
     /** One-line description, used as the suggested configuration name. */
     fun describe(c: SaffronRunConfiguration): String = "saffron " + arguments(c).joinToString(" ")

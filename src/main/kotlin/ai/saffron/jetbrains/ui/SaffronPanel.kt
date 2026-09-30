@@ -1,6 +1,7 @@
 package ai.saffron.jetbrains.ui
 
 import ai.saffron.jetbrains.run.SaffronCommand
+import ai.saffron.jetbrains.run.SaffronRunConfiguration
 import ai.saffron.jetbrains.run.SaffronRunner
 import com.intellij.execution.ExecutionListener
 import com.intellij.execution.ExecutionManager
@@ -18,6 +19,7 @@ import com.intellij.openapi.fileEditor.FileEditorManager
 import com.intellij.openapi.project.DumbAwareAction
 import com.intellij.openapi.project.Project
 import com.intellij.openapi.ui.SimpleToolWindowPanel
+import com.intellij.openapi.util.io.FileUtil
 import com.intellij.openapi.vfs.LocalFileSystem
 import com.intellij.openapi.vfs.newvfs.BulkFileListener
 import com.intellij.openapi.vfs.newvfs.events.VFileEvent
@@ -58,11 +60,15 @@ class SaffronPanel(private val project: Project, parent: Disposable) : SimpleToo
     private val refreshAlarm = Alarm(Alarm.ThreadToUse.SWING_THREAD, parent)
     private var all: List<SaffronFile> = emptyList()
     private var state: SaffronProjectState? = null
+    /** Pending review from the status: listed proposals plus unreadable ones; null until it loads. */
+    private var pendingFromStatus: Int? = null
+    private var scannedRoot: java.nio.file.Path? = null
+    private val service = SaffronStatusService.getInstance(project)
 
     init {
         toolbar = buildToolbar()
         setContent(buildContent())
-        list.setEmptyText("No .saffron files found under the project")
+        list.setEmptyText("No .saffron or .feature files found under the project")
         list.addMouseListener(object : MouseAdapter() {
             override fun mouseClicked(e: MouseEvent) {
                 if (e.clickCount != 2) return
@@ -76,12 +82,23 @@ class SaffronPanel(private val project: Project, parent: Disposable) : SimpleToo
         val connection = project.messageBus.connect(parent)
         connection.subscribe(VirtualFileManager.VFS_CHANGES, object : BulkFileListener {
             override fun after(events: List<VFileEvent>) {
-                if (events.any { it.path.endsWith(".saffron") || it.path.contains("/.saffron/") }) scheduleRefresh()
+                val root = FileUtil.toSystemIndependentName(service.root.toString()).trimEnd('/') + "/"
+                if (events.any { e ->
+                        e.path.startsWith(root) &&
+                            (e.path.endsWith(".saffron") || e.path.endsWith(".feature") || e.path.contains("/.saffron/"))
+                    }
+                ) scheduleRefresh()
             }
         })
         connection.subscribe(ExecutionManager.EXECUTION_TOPIC, object : ExecutionListener {
-            override fun processTerminated(executorId: String, env: ExecutionEnvironment, handler: ProcessHandler, exitCode: Int) =
-                scheduleRefresh()
+            override fun processTerminated(executorId: String, env: ExecutionEnvironment, handler: ProcessHandler, exitCode: Int) {
+                if (env.runProfile is SaffronRunConfiguration) scheduleRefresh()
+            }
+        })
+        connection.subscribe(SaffronStatusService.TOPIC, StatusListener { load ->
+            pendingFromStatus = load.status?.let { it.proposals.size + it.unreadableProposals.size }
+            // Another project chosen: its files, not the last one's.
+            if (service.root != scannedRoot) scan() else state?.let(::show)
         })
         refresh()
     }
@@ -151,16 +168,14 @@ class SaffronPanel(private val project: Project, parent: Disposable) : SimpleToo
     }
 
     private fun openReport() {
-        val base = project.basePath ?: return
-        val html = java.nio.file.Path.of(base, ".saffron", "reports", "latest.html")
+        val html = service.root.resolve(".saffron/reports/latest.html")
         if (java.nio.file.Files.exists(html)) BrowserUtil.browse(html.toUri()) else hint.text = "No report yet: run something first."
     }
 
     private fun acceptAll() = SaffronRunner.execute(project, "Saffron: accept all") { it.command = "accept" }
 
     private fun open(file: SaffronFile) {
-        val base = project.basePath ?: return
-        val vf = LocalFileSystem.getInstance().refreshAndFindFileByPath("$base/${file.relativePath}") ?: return
+        val vf = LocalFileSystem.getInstance().refreshAndFindFileByNioFile(service.root.resolve(file.relativePath)) ?: return
         FileEditorManager.getInstance(project).openFile(vf, true)
     }
 
@@ -172,10 +187,15 @@ class SaffronPanel(private val project: Project, parent: Disposable) : SimpleToo
     }
 
     private fun refresh() {
-        SaffronStatusService.getInstance(project).refresh()
-        val base = project.basePath ?: return
+        service.refresh()
+        scan()
+    }
+
+    private fun scan() {
+        val root = service.root
+        scannedRoot = root
         ApplicationManager.getApplication().executeOnPooledThread {
-            val scanned = runCatching { SaffronProjectScan.scan(base) }.getOrNull() ?: return@executeOnPooledThread
+            val scanned = runCatching { SaffronProjectScan.scan(root.toString()) }.getOrNull() ?: return@executeOnPooledThread
             ApplicationManager.getApplication().invokeLater({ show(scanned) }, project.disposed)
         }
     }
@@ -189,10 +209,12 @@ class SaffronPanel(private val project: Project, parent: Disposable) : SimpleToo
             val cost = r.costUsd?.let { "$" + "%.2f".format(it) } ?: "cost not reported"
             "Last run: ${r.green} passed · ${r.yellow} pending review · ${r.red} failed · $cost${ago(r.finishedAt)}"
         } ?: "No runs yet."
-        pending.text = when (s.pendingProposals) {
+        // The status knows unreadable proposals too; the file count is the fallback until it loads.
+        val pendingCount = pendingFromStatus ?: s.pendingProposals
+        pending.text = when (pendingCount) {
             0 -> "No proposals pending review."
             1 -> "1 proposal pending review (Accept All Proposals, or saffron accept)."
-            else -> "${s.pendingProposals} proposals pending review (Accept All Proposals, or saffron accept)."
+            else -> "$pendingCount proposals pending review (Accept All Proposals, or saffron accept)."
         }
         hint.text = if (s.packageInstalled) "" else "saffron-ai is not installed here: runs fall back to npx. Run npm i -D saffron-ai."
     }

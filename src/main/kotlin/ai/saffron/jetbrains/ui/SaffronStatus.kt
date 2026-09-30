@@ -5,6 +5,7 @@ import com.google.gson.Gson
 import com.google.gson.JsonObject
 import com.intellij.execution.configurations.GeneralCommandLine
 import com.intellij.execution.util.ExecUtil
+import com.intellij.ide.util.PropertiesComponent
 import com.intellij.openapi.Disposable
 import com.intellij.openapi.application.ApplicationManager
 import com.intellij.openapi.application.PathManager
@@ -12,6 +13,7 @@ import com.intellij.openapi.components.Service
 import com.intellij.openapi.project.Project
 import com.intellij.util.Alarm
 import com.intellij.util.messages.Topic
+import java.nio.file.Path
 import java.util.concurrent.atomic.AtomicBoolean
 
 /**
@@ -73,7 +75,8 @@ class StatusTotals(
     val yellow: Int = 0,
     val red: Int = 0,
     val aiCalls: Int = 0,
-    val costUsd: Double = 0.0,
+    /** Null when the provider reports no price: not reported, never a measured $0. */
+    val costUsd: Double? = null,
     val plan: StatusPlan? = null,
     val models: List<String>? = null,
 )
@@ -144,7 +147,7 @@ class StatusLastRun(
     val attention: List<StatusAttention>? = null,
 )
 
-class StatusHistoryRun(val startedAt: String = "", val green: Int = 0, val yellow: Int = 0, val red: Int = 0, val aiCalls: Int = 0, val costUsd: Double = 0.0)
+class StatusHistoryRun(val startedAt: String = "", val green: Int = 0, val yellow: Int = 0, val red: Int = 0, val aiCalls: Int = 0, val costUsd: Double? = null)
 
 class DuplicateWording(val steps: List<String> = emptyList(), val actions: String = "")
 
@@ -166,6 +169,9 @@ class StatusOrphan(
     val reason: String = "unknown",
 )
 
+/** A proposal file the runner could not read, and what is wrong with it. */
+class UnreadableProposal(val file: String = "", val problem: String = "")
+
 class StatusConfig(val file: String? = null, val effective: JsonObject = JsonObject())
 
 class ProjectStatus(
@@ -175,6 +181,8 @@ class ProjectStatus(
     val features: List<StatusFeature> = emptyList(),
     val tags: List<StatusTag> = emptyList(),
     val proposals: List<StatusProposal> = emptyList(),
+    /** Absent from runners before 0.9.2. */
+    val unreadableProposals: List<UnreadableProposal> = emptyList(),
     val lastRun: StatusLastRun? = null,
     val history: List<StatusHistoryRun> = emptyList(),
     val vocabulary: StatusVocabulary = StatusVocabulary(),
@@ -201,6 +209,23 @@ class SaffronStatusService(private val project: Project) : Disposable {
     var latest: StatusLoad = StatusLoad(null, null)
         private set
 
+    /** Saffron projects under the IDE root, as last discovered. */
+    @Volatile
+    var roots: List<Path> = project.basePath?.let { SaffronRoots.discover(Path.of(it)) } ?: emptyList()
+        private set
+
+    /** The project the tool window shows: the one chosen when there are several, else the only one, else the IDE root. */
+    val root: Path
+        get() {
+            val chosen = PropertiesComponent.getInstance(project).getValue(ROOT_KEY)?.let(Path::of)
+            return chosen?.takeIf { it in roots } ?: roots.firstOrNull() ?: Path.of(project.basePath ?: "")
+        }
+
+    fun choose(root: Path) {
+        PropertiesComponent.getInstance(project).setValue(ROOT_KEY, root.toString())
+        refresh()
+    }
+
     private val alarm = Alarm(Alarm.ThreadToUse.POOLED_THREAD, this)
     private val loading = AtomicBoolean(false)
 
@@ -216,7 +241,8 @@ class SaffronStatusService(private val project: Project) : Disposable {
             return
         }
         try {
-            val result = runStatus(project.basePath)
+            project.basePath?.let { roots = SaffronRoots.discover(Path.of(it)) }
+            val result = if (SaffronCommand.trusted(project)) runStatus(root.toString()) else StatusLoad(null, UNTRUSTED)
             latest = result
             ApplicationManager.getApplication().invokeLater(
                 { project.messageBus.syncPublisher(TOPIC).statusChanged(result) },
@@ -230,6 +256,11 @@ class SaffronStatusService(private val project: Project) : Disposable {
     override fun dispose() {}
 
     companion object {
+        private const val ROOT_KEY = "ai.saffron.jetbrains.root"
+
+        /** Shown instead of running anything in a project the user has not trusted. */
+        const val UNTRUSTED = "Trust the project to load Saffron status"
+
         val TOPIC: Topic<StatusListener> = Topic.create("Saffron status", StatusListener::class.java)
 
         fun getInstance(project: Project): SaffronStatusService = project.getService(SaffronStatusService::class.java)

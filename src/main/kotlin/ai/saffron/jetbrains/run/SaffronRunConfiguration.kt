@@ -49,6 +49,11 @@ class SaffronRunConfiguration(project: Project, factory: ConfigurationFactory, n
         get() = options.extraArgs ?: ""
         set(value) { options.extraArgs = value }
 
+    /** Null when blank: the IDE project directory. */
+    var workingDirectory: String?
+        get() = options.workingDirectory?.takeIf { it.isNotBlank() }
+        set(value) { options.workingDirectory = value ?: "" }
+
     override fun getConfigurationEditor(): SettingsEditor<out RunConfiguration> = SaffronSettingsEditor()
 
     override fun getState(executor: Executor, environment: ExecutionEnvironment): RunProfileState =
@@ -60,7 +65,7 @@ class SaffronRunConfiguration(project: Project, factory: ConfigurationFactory, n
             val known = SaffronCommand.COMMANDS
             throw RuntimeConfigurationError("Unknown Saffron command \"$command\"; use ${known.dropLast(1).joinToString(", ")} or ${known.last()}")
         }
-        if (project.basePath == null) throw RuntimeConfigurationError("The project has no directory to run in")
+        if ((workingDirectory ?: project.basePath) == null) throw RuntimeConfigurationError("The project has no directory to run in")
     }
 
     override fun suggestedName(): String = SaffronCommand.describe(this)

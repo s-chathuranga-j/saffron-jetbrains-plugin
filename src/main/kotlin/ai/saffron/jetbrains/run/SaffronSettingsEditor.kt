@@ -20,20 +20,23 @@ class SaffronSettingsEditor : SettingsEditor<SaffronRunConfiguration>() {
     private val headed = JBCheckBox("Headed browser")
     private val rerecord = JBCheckBox("Re-record the selected scenarios (discards their committed caches)")
     private val extraArgs = RawCommandLineEditor()
+    private val workingDirectory = JBTextField()
 
     private val pathsLabel = JBLabel()
 
     private val panel: JPanel = FormBuilder.createFormBuilder()
         .addLabeledComponent("Command:", command)
         .addLabeledComponent(pathsLabel, paths)
-        .addTooltip("Relative to the project root, separated by spaces; put a path that contains a space in double quotes. run: feature files or folders, blank runs everything under features/. accept / reject: proposal files, blank means --all. trace: one scenario name, or feature:scenario, quotes optional; blank opens every traced scenario.")
+        .addTooltip("Relative to the project root, separated by spaces; put a path that contains a space in double quotes. run: feature files or folders, blank runs everything under features/. accept / reject: proposal files, blank means --all. trace: one scenario name, or feature:scenario, quotes optional; blank opens every traced scenario. login: the provider (claude, codex, antigravity or cursor), blank checks the configured one.")
         .addLabeledComponent("Tags:", tags)
-        .addTooltip("Only scenarios carrying any of these @tags, comma separated (for example @smoke,@checkout).")
+        .addTooltip("A list of tags, any of which runs a scenario (for example @smoke,@checkout), or an expression (for example \"@e2e and not @wip\").")
         .addComponent(replayOnly)
         .addComponent(headed)
         .addComponent(rerecord)
         .addLabeledComponent("Extra arguments:", extraArgs)
         .addTooltip("Anything else saffron accepts, for example --strict or --workers 4.")
+        .addLabeledComponent("Working directory:", workingDirectory)
+        .addTooltip("The Saffron project to run in, the folder holding saffron.config.json. Blank means the project directory.")
         .panel
 
     init {
@@ -47,6 +50,7 @@ class SaffronSettingsEditor : SettingsEditor<SaffronRunConfiguration>() {
         pathsLabel.text = when (selected) {
             "trace" -> "Scenario:"
             "accept", "reject" -> "Proposal files:"
+            "login" -> "Provider:"
             else -> "Files or folders:"
         }
         paths.isEnabled = selected != "report" && selected != "prune"
@@ -61,6 +65,7 @@ class SaffronSettingsEditor : SettingsEditor<SaffronRunConfiguration>() {
         headed.isSelected = c.headed
         rerecord.isSelected = c.rerecord
         extraArgs.text = c.extraArgs
+        workingDirectory.text = c.workingDirectory ?: ""
         updateEnabled()
     }
 
@@ -72,6 +77,7 @@ class SaffronSettingsEditor : SettingsEditor<SaffronRunConfiguration>() {
         c.headed = headed.isSelected
         c.rerecord = rerecord.isSelected
         c.extraArgs = extraArgs.text.trim()
+        c.workingDirectory = workingDirectory.text.trim()
     }
 
     override fun createEditor(): JComponent = panel

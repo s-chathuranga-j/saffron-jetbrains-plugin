@@ -1,0 +1,64 @@
+{
+  "tool": "saffron",
+  "version": "0.9.2",
+  "projectRoot": "/work/shop",
+  "packageInstalled": true,
+  "config": { "file": "saffron.config.json", "effective": { "baseURL": "http://x", "retries": 2 } },
+  "features": [
+    {
+      "path": "features/login.saffron",
+      "name": "Login",
+      "stepSets": 1,
+      "scenarios": [
+        { "name": "Successful login", "line": 7, "tags": ["@smoke"], "outline": false, "rows": 1, "cached": true, "cacheState": "valid", "proposal": false, "lastStatus": "green" },
+        { "name": "Login errors", "line": 14, "tags": [], "outline": false, "rows": 1, "cached": true, "cacheState": "invalid", "cacheProblem": "steps[0].actions: expected an array", "proposal": true }
+      ]
+    }
+  ],
+  "tags": [{ "tag": "@smoke", "scenarios": 1 }],
+  "proposals": [
+    {
+      "file": ".saffron/proposals/login-saffron/login-errors.json",
+      "feature": "features/login.saffron",
+      "scenario": "Login errors",
+      "mode": "record",
+      "createdAt": "t",
+      "verified": true,
+      "stale": "the scenario changed since it was filed",
+      "unbound": true,
+      "revision": "9f86d081884c7d659a2feaa0c55ad015a3bf4f1b2b0b822cd15d6c15b0f00a08",
+      "adaptations": [],
+      "narrative": "n",
+      "aiCalls": 5
+    }
+  ],
+  "unreadableProposals": [
+    { "file": ".saffron/proposals/login-saffron/broken.json", "problem": "Unexpected end of JSON input" }
+  ],
+  "lastRun": {
+    "startedAt": "a",
+    "finishedAt": "b",
+    "totals": { "scenarios": 1, "green": 1, "yellow": 0, "red": 0, "aiCalls": 3, "plan": { "subscriptionType": "max", "fiveHourBefore": 18, "fiveHourAfter": 20 } },
+    "reportHtml": ".saffron/reports/latest.html",
+    "attention": [
+      {
+        "feature": "features/login.saffron",
+        "scenario": "Login errors",
+        "baseScenario": "Login errors",
+        "status": "red",
+        "error": "Timed out",
+        "failedStep": "I should see the error",
+        "evidence": [
+          { "kind": "trace", "file": ".saffron/artifacts/login-saffron/login-errors/trace.zip" },
+          { "kind": "failure", "file": ".saffron/artifacts/login-saffron/login-errors/failure.jpg", "step": "I should see the error", "sha256": "9f86d081884c7d659a2feaa0c55ad015a3bf4f1b2b0b822cd15d6c15b0f00a08" }
+        ]
+      }
+    ]
+  },
+  "history": [{ "startedAt": "a", "green": 1, "yellow": 0, "red": 0, "aiCalls": 3 }],
+  "vocabulary": { "steps": 3, "recorded": 2, "unrecorded": 1, "stepSets": 1, "divergent": ["x"], "duplicateWordings": [{ "steps": ["p", "q"], "actions": "goto /" }] },
+  "orphans": [
+    { "file": ".saffron/cache/old-saffron/gone.json", "kind": "cache", "feature": "features/old.saffron", "scenario": "Gone", "reason": "feature-gone" }
+  ],
+  "data": { "dir": "data", "env": "staging", "files": ["users.json"], "unresolved": [{ "ref": "{data:users.nobody}", "reason": "no key nobody", "feature": "features/login.saffron", "scenario": "Login errors" }] }
+}

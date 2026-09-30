@@ -11,4 +11,6 @@ class SaffronRunOptions : LocatableRunConfigurationOptions() {
     var headed: Boolean by property(false)
     var rerecord: Boolean by property(false)
     var extraArgs: String? by string("")
+    /** The Saffron project to run in; blank means the IDE project directory. */
+    var workingDirectory: String? by string("")
 }

@@ -1,5 +1,6 @@
 package ai.saffron.jetbrains.run
 
+import com.intellij.execution.ExecutionException
 import com.intellij.execution.configurations.CommandLineState
 import com.intellij.execution.process.KillableColoredProcessHandler
 import com.intellij.execution.process.ProcessHandler
@@ -12,6 +13,7 @@ class SaffronCommandLineState(
 ) : CommandLineState(environment) {
 
     override fun startProcess(): ProcessHandler {
+        if (!SaffronCommand.trusted(configuration.project)) throw ExecutionException("Trust the project to run Saffron")
         val handler = KillableColoredProcessHandler(SaffronCommand.forConfiguration(configuration))
         ProcessTerminatedListener.attach(handler)
         return handler

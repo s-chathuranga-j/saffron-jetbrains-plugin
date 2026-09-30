@@ -8,7 +8,10 @@ import kotlin.io.path.extension
 import kotlin.io.path.isDirectory
 import kotlin.io.path.name
 
-/** One `.saffron` file as listed in the tool window. */
+/** Extensions of feature files the runner reads. */
+internal val FEATURE_EXTENSIONS = setOf("saffron", "feature")
+
+/** One `.saffron` or `.feature` file as listed in the tool window. */
 data class SaffronFile(val relativePath: String, val scenarios: Int, val stepSets: Int) {
     val isLibrary: Boolean get() = scenarios == 0 && stepSets > 0
     override fun toString(): String = relativePath
@@ -32,7 +35,7 @@ data class SaffronProjectState(
  */
 object SaffronProjectScan {
 
-    private val SKIP_DIRS = setOf("node_modules", ".git", ".saffron", "dist", "build", "target", ".idea")
+    internal val SKIP_DIRS = setOf("node_modules", ".git", ".saffron", "dist", "build", "target", ".idea")
     private val SCENARIO = Regex("^\\s*Scenario( Outline| Template)?:")
     private val STEP_SET = Regex("^\\s*StepSet:")
 
@@ -41,7 +44,7 @@ object SaffronProjectScan {
         if (Files.exists(base.resolve("saffron.config.json"))) return true
         if (Files.isDirectory(base.resolve("node_modules/saffron-ai"))) return true
         val features = base.resolve("features")
-        return Files.isDirectory(features) && Files.list(features).use { s -> s.anyMatch { it.extension == "saffron" } }
+        return Files.isDirectory(features) && Files.list(features).use { s -> s.anyMatch { it.extension in FEATURE_EXTENSIONS } }
     }
 
     fun scan(basePath: String): SaffronProjectState {
@@ -54,7 +57,7 @@ object SaffronProjectScan {
                 else java.nio.file.FileVisitResult.CONTINUE
 
             override fun visitFile(file: Path, attrs: java.nio.file.attribute.BasicFileAttributes): java.nio.file.FileVisitResult {
-                if (file.extension == "saffron") files += describe(base, file)
+                if (file.extension in FEATURE_EXTENSIONS) files += describe(base, file)
                 return java.nio.file.FileVisitResult.CONTINUE
             }
 
@@ -104,5 +107,41 @@ object SaffronProjectScan {
     private fun countProposals(dir: Path): Int {
         if (!dir.isDirectory()) return 0
         return Files.walk(dir).use { s -> s.filter { it.extension == "json" }.count().toInt() }
+    }
+}
+
+/** Saffron projects under the IDE's root: the runner's own nesting rule, from the plugin's side. */
+object SaffronRoots {
+
+    /**
+     * Every folder at most [maxDepth] levels below [top] holding a
+     * saffron.config.json; else [top] alone when it looks like a Saffron
+     * project without one; else nothing.
+     */
+    fun discover(top: Path, maxDepth: Int = 4): List<Path> {
+        val found = mutableListOf<Path>()
+        fun walk(dir: Path, depth: Int) {
+            if (Files.exists(dir.resolve("saffron.config.json"))) found.add(dir)
+            if (depth == maxDepth) return
+            val children = runCatching { Files.newDirectoryStream(dir) { it.isDirectory() && it.name !in SaffronProjectScan.SKIP_DIRS }.use { it.toList() } }
+                .getOrDefault(emptyList())
+            for (child in children.sorted()) walk(child, depth + 1)
+        }
+        if (Files.isDirectory(top)) walk(top, 0)
+        if (found.isEmpty() && SaffronProjectScan.isSaffronProject(top.toString())) found.add(top)
+        return found
+    }
+
+    /** The runner's projectRootFor: the nearest folder above [file] with a saffron.config.json, never above [top]; else [top]. */
+    fun rootFor(file: Path, top: Path): Path {
+        val bound = top.toAbsolutePath().normalize()
+        var dir = file.toAbsolutePath().normalize().parent
+        if (dir == null || !dir.startsWith(bound)) return top
+        while (dir != null) {
+            if (Files.exists(dir.resolve("saffron.config.json"))) return dir
+            if (dir == bound) break
+            dir = dir.parent
+        }
+        return top
     }
 }

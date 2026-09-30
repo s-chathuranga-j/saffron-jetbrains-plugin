@@ -113,8 +113,7 @@ class HealthTab(project: Project, parent: Disposable) : StatusTab(project, paren
     private fun node(row: Row): DefaultMutableTreeNode = DefaultMutableTreeNode(row)
 
     private fun openConfig() {
-        val base = project.basePath ?: return
-        val vf = LocalFileSystem.getInstance().refreshAndFindFileByPath("$base/saffron.config.json")
+        val vf = LocalFileSystem.getInstance().refreshAndFindFileByNioFile(projectRoot.resolve("saffron.config.json"))
         if (vf != null) FileEditorManager.getInstance(project).openFile(vf, true) else note.text = "No saffron.config.json yet: run npx saffron init."
     }
 }

@@ -3,8 +3,11 @@ package ai.saffron.jetbrains
 import ai.saffron.jetbrains.run.SaffronCommand
 import ai.saffron.jetbrains.run.SaffronConfigurationType
 import ai.saffron.jetbrains.run.SaffronRunConfiguration
+import ai.saffron.jetbrains.run.SaffronRunner
 import ai.saffron.jetbrains.run.SaffronSettingsEditor
 import ai.saffron.jetbrains.ui.SaffronProjectScan
+import ai.saffron.jetbrains.ui.SaffronRoots
+import ai.saffron.jetbrains.ui.SaffronStatusService
 import ai.saffron.jetbrains.ui.ProjectStatus
 import ai.saffron.jetbrains.ui.StatusProposal
 import com.google.gson.Gson
@@ -18,10 +21,14 @@ import com.intellij.openapi.actionSystem.ActionPlaces
 import com.intellij.openapi.actionSystem.CommonDataKeys
 import com.intellij.openapi.actionSystem.impl.SimpleDataContext
 import com.intellij.openapi.util.Disposer
+import com.intellij.openapi.util.io.FileUtil
+import com.intellij.openapi.vfs.LocalFileSystem
+import com.intellij.psi.PsiManager
 import com.intellij.testFramework.fixtures.BasePlatformTestCase
 import com.intellij.util.ThrowableRunnable
 import com.intellij.util.ui.UIUtil
 import java.nio.file.Files
+import java.nio.file.Path
 import javax.swing.JLabel
 
 class SaffronRunConfigurationTest : BasePlatformTestCase() {
@@ -124,7 +131,7 @@ class SaffronRunConfigurationTest : BasePlatformTestCase() {
         c.command = "bogus"
         assertThrows(
             RuntimeConfigurationError::class.java,
-            "Unknown Saffron command \"bogus\"; use run, report, trace, accept, reject or prune",
+            "Unknown Saffron command \"bogus\"; use run, report, trace, accept, reject, prune or login",
             ThrowableRunnable<Throwable> { c.checkConfiguration() },
         )
     }
@@ -190,6 +197,7 @@ class SaffronRunConfigurationTest : BasePlatformTestCase() {
         Files.createDirectories(dir.resolve("node_modules/other/features"))
         Files.writeString(dir.resolve("features/login.saffron"), "Feature: L\n\nScenario: A\n  Given x\n\nScenario Outline: B\n  Given <y>\n")
         Files.writeString(dir.resolve("features/shared.steps.saffron"), "Feature: S\n\nStepSet: Log in\n  Given x\n")
+        Files.writeString(dir.resolve("features/cart.feature"), "Feature: C\n\nScenario: Add\n  Given x\n")
         Files.writeString(dir.resolve("node_modules/other/features/ignored.saffron"), "Scenario: nope\n")
         Files.createDirectories(dir.resolve(".saffron/reports"))
         Files.createDirectories(dir.resolve(".saffron/proposals/login-saffron"))
@@ -201,9 +209,10 @@ class SaffronRunConfigurationTest : BasePlatformTestCase() {
         )
         assertTrue(SaffronProjectScan.isSaffronProject(dir.toString()))
         val state = SaffronProjectScan.scan(dir.toString())
-        assertEquals(listOf("features/login.saffron", "features/shared.steps.saffron"), state.files.map { it.relativePath })
-        assertEquals(2, state.files[0].scenarios)
-        assertTrue(state.files[1].isLibrary)
+        assertEquals(listOf("features/cart.feature", "features/login.saffron", "features/shared.steps.saffron"), state.files.map { it.relativePath })
+        assertEquals(1, state.files[0].scenarios)
+        assertEquals(2, state.files[1].scenarios)
+        assertTrue(state.files[2].isLibrary)
         assertEquals(2, state.lastRun!!.green)
         assertEquals(1, state.lastRun!!.yellow)
         assertEquals(1.5, state.lastRun!!.costUsd)
@@ -212,32 +221,27 @@ class SaffronRunConfigurationTest : BasePlatformTestCase() {
         assertTrue(state.hasReport)
     }
 
+    /** What `saffron status --json` prints in 0.9.2: no cost from an unpriced provider, unreadable proposals, cache states, data. */
+    private fun fixture(): ProjectStatus =
+        Gson().fromJson(javaClass.getResource("/status-0.9.2.json")!!.readText(), ProjectStatus::class.java)
+
     fun `test the status JSON from the runner maps onto the data classes`() {
         val digest = "9f86d081884c7d659a2feaa0c55ad015a3bf4f1b2b0b822cd15d6c15b0f00a08"
-        val json = """{"tool":"saffron","version":"0.5.4","packageInstalled":true,
-          "config":{"file":"saffron.config.json","effective":{"baseURL":"http://x","retries":2}},
-          "features":[{"path":"features/login.saffron","name":"Login","stepSets":1,
-            "scenarios":[{"name":"Successful login","line":7,"tags":["@smoke"],"outline":false,"rows":1,"cached":true,"proposal":false,"lastStatus":"green"}]}],
-          "tags":[{"tag":"@smoke","scenarios":1}],
-          "proposals":[{"file":".saffron/proposals/login-saffron/login-errors.json","feature":"features/login.saffron","scenario":"Login errors","mode":"record","createdAt":"t","verified":true,"adaptations":[],"narrative":"n","aiCalls":5,"costUsd":1.5,"revision":"$digest"}],
-          "lastRun":{"startedAt":"a","finishedAt":"b","totals":{"scenarios":1,"green":1,"yellow":0,"red":0,"aiCalls":0,"costUsd":0,"plan":{"subscriptionType":"max","fiveHourBefore":18,"fiveHourAfter":20}},"reportHtml":".saffron/reports/latest.html",
-            "attention":[{"feature":"features/login.saffron","scenario":"Login errors","baseScenario":"Login errors","status":"red","error":"Timed out","failedStep":"I should see the error",
-              "evidence":[{"kind":"trace","file":".saffron/artifacts/login-saffron/login-errors/trace.zip"},
-                {"kind":"failure","file":".saffron/artifacts/login-saffron/login-errors/failure.jpg","step":"I should see the error","sha256":"$digest"}]}]},
-          "history":[{"startedAt":"a","green":1,"yellow":0,"red":0,"aiCalls":0,"costUsd":0}],
-          "vocabulary":{"steps":3,"recorded":2,"unrecorded":1,"stepSets":1,"divergent":["x"],"duplicateWordings":[{"steps":["p","q"],"actions":"goto /"}]}}"""
-        val s = Gson().fromJson(json, ProjectStatus::class.java)
-        assertEquals("0.5.4", s.version)
+        val s = fixture()
+        assertEquals("0.9.2", s.version)
         assertEquals("Login", s.features[0].name)
         assertEquals(7, s.features[0].scenarios[0].line)
         assertEquals("green", s.features[0].scenarios[0].lastStatus)
         assertEquals(1, s.proposals.size)
         assertEquals(true, s.proposals[0].verified)
         assertEquals(digest, s.proposals[0].revision)
+        assertEquals("the scenario changed since it was filed", s.proposals[0].stale)
+        assertEquals(true, s.proposals[0].unbound)
         assertEquals(20.0, s.lastRun!!.totals.plan!!.fiveHourAfter)
         assertEquals("x", s.vocabulary.divergent[0])
         assertEquals(listOf("p", "q"), s.vocabulary.duplicateWordings[0].steps)
         assertEquals("http://x", s.config.effective.get("baseURL").asString)
+        assertEquals("feature-gone", s.orphans!!.single().reason)
         val attention = s.lastRun.attention!!.single()
         assertEquals("I should see the error", attention.failedStep)
         assertEquals(listOf("trace", "failure"), attention.evidence.map { it.kind })
@@ -246,6 +250,118 @@ class SaffronRunConfigurationTest : BasePlatformTestCase() {
         // field would switch it off without anything else failing.
         assertEquals(digest, attention.evidence[1].sha256)
         assertEquals("I should see the error", attention.evidence[1].step)
+    }
+
+    fun `test a cost the runner omits is not reported, never a measured zero`() {
+        val s = fixture()
+        assertNull(s.lastRun!!.totals.costUsd)
+        assertNull(s.history.single().costUsd)
+        assertNull(s.proposals.single().costUsd)
+        assertEquals(3, s.lastRun.totals.aiCalls)
+    }
+
+    fun `test unreadable proposals are read with their reason`() {
+        val broken = fixture().unreadableProposals.single()
+        assertEquals(".saffron/proposals/login-saffron/broken.json", broken.file)
+        assertEquals("Unexpected end of JSON input", broken.problem)
+        // An older runner's status has no such list.
+        assertEmpty(Gson().fromJson("{}", ProjectStatus::class.java).unreadableProposals)
+    }
+
+    fun `test discover finds every nested project and falls back to the root`() {
+        val top = Files.createTempDirectory("saffron-roots")
+        try {
+            // No config anywhere, no package, no features: nothing.
+            assertEmpty(SaffronRoots.discover(top))
+            // A plain project at the root, without a config: the root.
+            Files.createDirectories(top.resolve("node_modules/saffron-ai"))
+            assertEquals(listOf(top), SaffronRoots.discover(top))
+            for (dir in listOf("apps/web", "apps/admin", "node_modules/pkg", "a/b/c/d/e")) {
+                Files.createDirectories(top.resolve(dir))
+                Files.writeString(top.resolve("$dir/saffron.config.json"), "{}")
+            }
+            // Skipped folders and folders below the depth limit are not searched.
+            assertEquals(listOf(top.resolve("apps/admin"), top.resolve("apps/web")), SaffronRoots.discover(top))
+            assertEquals(
+                listOf(top.resolve("a/b/c/d/e"), top.resolve("apps/admin"), top.resolve("apps/web")),
+                SaffronRoots.discover(top, maxDepth = 5),
+            )
+        } finally {
+            top.toFile().deleteRecursively()
+        }
+    }
+
+    fun `test rootFor walks up to the nearest config, never above the top`() {
+        val top = Files.createTempDirectory("saffron-root-for")
+        try {
+            Files.createDirectories(top.resolve("apps/web/features/deep"))
+            Files.writeString(top.resolve("apps/web/saffron.config.json"), "{}")
+            assertEquals(top.resolve("apps/web"), SaffronRoots.rootFor(top.resolve("apps/web/features/deep/a.saffron"), top))
+            assertEquals(top.resolve("apps/web"), SaffronRoots.rootFor(top.resolve("apps/web/saffron.config.json"), top))
+            // No config on the way up: the top.
+            assertEquals(top, SaffronRoots.rootFor(top.resolve("other/a.feature"), top))
+            // A config above the top is not looked at.
+            Files.writeString(top.resolve("saffron.config.json"), "{}")
+            val inner = top.resolve("apps")
+            assertEquals(inner, SaffronRoots.rootFor(inner.resolve("mobile/a.feature"), inner))
+            assertEquals(inner, SaffronRoots.rootFor(top.resolve("elsewhere/a.feature"), inner))
+        } finally {
+            top.toFile().deleteRecursively()
+        }
+    }
+
+    fun `test right-clicking a file in a nested project runs it from that project`() {
+        val base = Path.of(project.basePath!!)
+        val nested = base.resolve("apps/web")
+        try {
+            Files.createDirectories(nested.resolve("features"))
+            Files.writeString(nested.resolve("saffron.config.json"), "{}")
+            Files.writeString(nested.resolve("features/cart.feature"), "Feature: Cart\n\nScenario: Add\n    Given x\n")
+            val vf = LocalFileSystem.getInstance().refreshAndFindFileByNioFile(nested.resolve("features/cart.feature"))!!
+            val file = PsiManager.getInstance(project).findFile(vf)!!
+            val dataContext = SimpleDataContext.builder()
+                .add(CommonDataKeys.PROJECT, project)
+                .add(CommonDataKeys.PSI_FILE, file)
+                .add(Location.DATA_KEY, PsiLocation(file))
+                .build()
+            val context = ConfigurationContext.getFromContext(dataContext, ActionPlaces.UNKNOWN)
+            val saffron = (context.configurationsFromContext ?: emptyList()).mapNotNull { it.configuration as? SaffronRunConfiguration }.single()
+            assertEquals(FileUtil.toSystemIndependentName(nested.toString()), saffron.workingDirectory)
+            assertEquals("features/cart.feature", saffron.paths)
+            assertEquals(saffron.workingDirectory, SaffronCommand.forConfiguration(saffron).workDirectory?.path?.let(FileUtil::toSystemIndependentName))
+        } finally {
+            base.resolve("apps").toFile().deleteRecursively()
+        }
+    }
+
+    fun `test a reused tool window configuration keeps nothing from its last use`() {
+        val name = "Saffron: reuse test"
+        val runManager = RunManager.getInstance(project)
+        try {
+            val first = SaffronRunner.prepare(project, name) {
+                it.rerecord = true; it.headed = true; it.tags = "@wip"; it.extraArgs = "--strict"; it.workingDirectory = "/elsewhere"
+            }
+            val second = SaffronRunner.prepare(project, name) { it.paths = "features/a.saffron" }
+            assertSame(first, second)
+            val c = second.configuration as SaffronRunConfiguration
+            assertFalse(c.rerecord)
+            assertFalse(c.headed)
+            assertEquals("", c.tags)
+            assertEquals("", c.extraArgs)
+            assertEquals(SaffronStatusService.getInstance(project).root.toString(), c.workingDirectory)
+            assertEquals(listOf("run", "features/a.saffron"), SaffronCommand.arguments(c))
+        } finally {
+            runManager.findConfigurationByTypeAndName(SaffronConfigurationType.INSTANCE, name)?.let(runManager::removeConfiguration)
+        }
+    }
+
+    fun `test login passes the provider typed in the field`() {
+        val c = newConfiguration()
+        c.command = "login"
+        c.paths = ""
+        assertEquals(listOf("login"), SaffronCommand.arguments(c))
+        c.paths = " codex "
+        assertEquals(listOf("login", "codex"), SaffronCommand.arguments(c))
     }
 
     fun `test Accept and Reject Selected name each proposal by the revision the tab showed`() {
