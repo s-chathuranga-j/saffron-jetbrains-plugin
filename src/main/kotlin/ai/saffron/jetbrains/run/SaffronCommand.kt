@@ -81,7 +81,7 @@ object SaffronCommand {
     }
 
     fun forConfiguration(c: SaffronRunConfiguration): GeneralCommandLine =
-        base(c.workingDirectory ?: c.project.basePath).withParameters(arguments(c))
+        base(c.resolvedWorkingDirectory).withParameters(arguments(c))
 
     /** One-line description, used as the suggested configuration name. */
     fun describe(c: SaffronRunConfiguration): String = "saffron " + arguments(c).joinToString(" ")

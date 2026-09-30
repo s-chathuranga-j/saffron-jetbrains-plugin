@@ -14,6 +14,8 @@ import com.intellij.openapi.wm.ToolWindowFactory
 import com.intellij.ui.content.ContentFactory
 import java.nio.file.Path
 import javax.swing.JComponent
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.withContext
 
 /**
  * The Saffron tool window (right side): Files, Last Run, Proposals, Tags, Health,
@@ -23,7 +25,7 @@ import javax.swing.JComponent
 class SaffronToolWindowFactory : ToolWindowFactory, DumbAware {
 
     override suspend fun isApplicableAsync(project: Project): Boolean =
-        project.basePath?.let { SaffronRoots.discover(Path.of(it)).isNotEmpty() } ?: false
+        withContext(Dispatchers.IO) { SaffronStatusService.getInstance(project).discoverRoots().isNotEmpty() }
 
     override fun createToolWindowContent(project: Project, toolWindow: ToolWindow) {
         val factory = ContentFactory.getInstance()

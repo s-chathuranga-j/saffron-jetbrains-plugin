@@ -36,15 +36,16 @@ data class SaffronProjectState(
 object SaffronProjectScan {
 
     internal val SKIP_DIRS = setOf("node_modules", ".git", ".saffron", "dist", "build", "target", ".idea")
-    private val SCENARIO = Regex("^\\s*Scenario( Outline| Template)?:")
+    private val SCENARIO = Regex("^\\s*(Scenario( Outline| Template)?|Example):")
     private val STEP_SET = Regex("^\\s*StepSet:")
 
     fun isSaffronProject(basePath: String?): Boolean {
         val base = basePath?.let(Path::of) ?: return false
         if (Files.exists(base.resolve("saffron.config.json"))) return true
         if (Files.isDirectory(base.resolve("node_modules/saffron-ai"))) return true
+        // .saffron only: a features/ folder of .feature files is any Cucumber or Behat project.
         val features = base.resolve("features")
-        return Files.isDirectory(features) && Files.list(features).use { s -> s.anyMatch { it.extension in FEATURE_EXTENSIONS } }
+        return Files.isDirectory(features) && Files.list(features).use { s -> s.anyMatch { it.extension == "saffron" } }
     }
 
     fun scan(basePath: String): SaffronProjectState {
@@ -52,7 +53,8 @@ object SaffronProjectScan {
         val files = mutableListOf<SaffronFile>()
         Files.walkFileTree(base, object : java.nio.file.SimpleFileVisitor<Path>() {
             override fun preVisitDirectory(dir: Path, attrs: java.nio.file.attribute.BasicFileAttributes): java.nio.file.FileVisitResult =
-                if (dir != base && dir.name in SKIP_DIRS) java.nio.file.FileVisitResult.SKIP_SUBTREE
+                // A folder with its own config is a nested project: its files are its own.
+                if (dir != base && (dir.name in SKIP_DIRS || Files.exists(dir.resolve("saffron.config.json")))) java.nio.file.FileVisitResult.SKIP_SUBTREE
                 else if (base.relativize(dir).nameCount > 12) java.nio.file.FileVisitResult.SKIP_SUBTREE
                 else java.nio.file.FileVisitResult.CONTINUE
 

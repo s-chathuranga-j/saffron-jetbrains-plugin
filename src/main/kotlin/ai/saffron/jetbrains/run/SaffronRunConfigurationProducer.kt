@@ -2,6 +2,7 @@ package ai.saffron.jetbrains.run
 
 import ai.saffron.jetbrains.ui.FEATURE_EXTENSIONS
 import ai.saffron.jetbrains.ui.SaffronRoots
+import ai.saffron.jetbrains.ui.SaffronStatusService
 import com.intellij.execution.actions.ConfigurationContext
 import com.intellij.execution.actions.LazyRunConfigurationProducer
 import com.intellij.execution.configurations.ConfigurationFactory
@@ -11,6 +12,7 @@ import com.intellij.openapi.vfs.VfsUtilCore
 import com.intellij.openapi.vfs.VirtualFile
 import com.intellij.openapi.vfs.VirtualFileVisitor
 import com.intellij.psi.PsiElement
+import java.nio.file.Files
 import java.nio.file.Path
 
 /**
@@ -27,8 +29,7 @@ class SaffronRunConfigurationProducer : LazyRunConfigurationProducer<SaffronRunC
         context: ConfigurationContext,
         sourceElement: Ref<PsiElement>,
     ): Boolean {
-        val target = target(context) ?: return false
-        val root = rootOf(context, target)
+        val (target, root) = target(context) ?: return false
         configuration.command = "run"
         configuration.workingDirectory = root
         configuration.paths = SaffronCommand.joinPaths(relativePaths(root, target))
@@ -37,31 +38,35 @@ class SaffronRunConfigurationProducer : LazyRunConfigurationProducer<SaffronRunC
     }
 
     override fun isConfigurationFromContext(configuration: SaffronRunConfiguration, context: ConfigurationContext): Boolean {
-        val target = target(context) ?: return false
-        val root = rootOf(context, target)
+        val (target, root) = target(context) ?: return false
+        // A blank directory (0.3.2 and earlier) is the project directory.
+        val dir = configuration.resolvedWorkingDirectory?.let(FileUtil::toSystemIndependentName)
         return configuration.command == "run" &&
-            configuration.workingDirectory == root &&
+            dir == root &&
             SaffronCommand.splitPaths(configuration.paths) == relativePaths(root, target) &&
             configuration.tags.isBlank()
     }
 
-    private fun target(context: ConfigurationContext): VirtualFile? {
+    /**
+     * The file or folder to run and the Saffron project it belongs to; null
+     * outside a Saffron project (Cucumber-JVM, SpecFlow and Behat have
+     * .feature files too), and for a folder holding other Saffron projects.
+     */
+    private fun target(context: ConfigurationContext): Pair<VirtualFile, String>? {
         val file = context.location?.virtualFile ?: return null
-        val matches = if (file.isDirectory) containsSaffronFiles(file) else file.extension in FEATURE_EXTENSIONS
-        return if (matches) file else null
-    }
-
-    /** The nearest folder above the target holding saffron.config.json, never above the project; else the project. */
-    private fun rootOf(context: ConfigurationContext, target: VirtualFile): String? {
+        if (!file.isDirectory && file.extension !in FEATURE_EXTENSIONS) return null
         val base = context.project.basePath ?: return null
+        val roots = SaffronStatusService.getInstance(context.project).roots
+        val path = Path.of(file.path)
         // rootFor starts at the parent, so a folder is given as a child of itself.
-        val start = Path.of(target.path).let { if (target.isDirectory) it.resolve("_") else it }
-        return FileUtil.toSystemIndependentName(SaffronRoots.rootFor(start, Path.of(base)).toString())
+        val root = SaffronRoots.rootFor(if (file.isDirectory) path.resolve("_") else path, Path.of(base))
+        if (!Files.exists(root.resolve("saffron.config.json")) && root !in roots) return null
+        if (file.isDirectory && (roots.any { it != root && it.startsWith(path) } || !containsSaffronFiles(file))) return null
+        return file to FileUtil.toSystemIndependentName(root.toString())
     }
 
     /** The target relative to the root; nothing when it IS the root (blank runs every feature file there). */
-    private fun relativePaths(root: String?, file: VirtualFile): List<String> {
-        root ?: return listOf(file.path)
+    private fun relativePaths(root: String, file: VirtualFile): List<String> {
         val rel = FileUtil.getRelativePath(root, file.path, '/')
         return when {
             rel == null || rel.startsWith("..") -> listOf(file.path)

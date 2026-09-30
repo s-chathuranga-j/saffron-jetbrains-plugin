@@ -24,6 +24,7 @@ import com.intellij.openapi.util.Disposer
 import com.intellij.openapi.util.io.FileUtil
 import com.intellij.openapi.vfs.LocalFileSystem
 import com.intellij.psi.PsiManager
+import com.intellij.testFramework.IndexingTestUtil
 import com.intellij.testFramework.fixtures.BasePlatformTestCase
 import com.intellij.util.ThrowableRunnable
 import com.intellij.util.ui.UIUtil
@@ -162,20 +163,113 @@ class SaffronRunConfigurationTest : BasePlatformTestCase() {
         assertTrue(all.toString(), all.takeLast(2).let { it[0].endsWith("saffron") && it[1] == "run" })
     }
 
-    fun `test right-clicking a saffron file offers a run configuration for it`() {
-        val file = myFixture.configureByText("login.saffron", "Feature: Login\n\nScenario: Works\n    Given I am on the login page\n")
+    /** The Saffron configurations the run menu offers for [target] (a file or folder on disk). */
+    private fun offered(target: Path): List<SaffronRunConfiguration> {
+        val vf = LocalFileSystem.getInstance().refreshAndFindFileByNioFile(target)!!
+        // Files made on disk are indexed, and during indexing the menu offers no Saffron run.
+        IndexingTestUtil.waitUntilIndexesAreReady(project)
+        val psi = PsiManager.getInstance(project).let { if (vf.isDirectory) it.findDirectory(vf)!! else it.findFile(vf)!! }
         val dataContext = SimpleDataContext.builder()
             .add(CommonDataKeys.PROJECT, project)
-            .add(CommonDataKeys.PSI_FILE, file)
-            .add(Location.DATA_KEY, PsiLocation(file))
+            .add(Location.DATA_KEY, PsiLocation(psi))
             .build()
         val context = ConfigurationContext.getFromContext(dataContext, ActionPlaces.UNKNOWN)
-        val fromContext = context.configurationsFromContext ?: emptyList()
-        val saffron = fromContext.mapNotNull { it.configuration as? SaffronRunConfiguration }.singleOrNull()
-        assertNotNull("no Saffron configuration produced from a .saffron file context: $fromContext", saffron)
-        assertEquals("run", saffron!!.command)
-        assertTrue(saffron.paths, saffron.paths.endsWith("login.saffron"))
-        assertEquals("Run login.saffron", saffron.name)
+        return (context.configurationsFromContext ?: emptyList()).mapNotNull { it.configuration as? SaffronRunConfiguration }
+    }
+
+    fun `test right-clicking a saffron file offers a run configuration for it`() {
+        val base = Path.of(project.basePath!!)
+        try {
+            Files.createDirectories(base.resolve("features"))
+            Files.writeString(base.resolve("saffron.config.json"), "{}")
+            Files.writeString(base.resolve("features/login.saffron"), "Feature: Login\n\nScenario: Works\n    Given I am on the login page\n")
+            val saffron = offered(base.resolve("features/login.saffron")).single()
+            assertEquals("run", saffron.command)
+            assertEquals("features/login.saffron", saffron.paths)
+            assertEquals("Run login.saffron", saffron.name)
+        } finally {
+            Files.deleteIfExists(base.resolve("saffron.config.json"))
+            base.resolve("features").toFile().deleteRecursively()
+        }
+    }
+
+    fun `test a feature file outside any Saffron project offers no Saffron configuration`() {
+        // Cucumber-JVM, SpecFlow, Behat: .feature files, no Saffron.
+        val base = Path.of(project.basePath!!)
+        try {
+            Files.createDirectories(base.resolve("features"))
+            Files.writeString(base.resolve("features/cart.feature"), "Feature: Cart\n\nScenario: Add\n    Given x\n")
+            SaffronStatusService.getInstance(project).discoverRoots()
+            assertEmpty(offered(base.resolve("features/cart.feature")))
+            assertEmpty(offered(base.resolve("features")))
+        } finally {
+            base.resolve("features").toFile().deleteRecursively()
+            SaffronStatusService.getInstance(project).discoverRoots()
+        }
+    }
+
+    fun `test a folder holding another Saffron project is not run from the outer one`() {
+        val base = Path.of(project.basePath!!)
+        try {
+            Files.writeString(base.resolve("saffron.config.json"), "{}")
+            Files.createDirectories(base.resolve("apps/web/features"))
+            Files.writeString(base.resolve("apps/web/saffron.config.json"), "{}")
+            Files.writeString(base.resolve("apps/web/features/a.saffron"), "Feature: A\n\nScenario: A\n    Given x\n")
+            SaffronStatusService.getInstance(project).discoverRoots()
+            assertEmpty(offered(base.resolve("apps")))
+            // The nested project itself still runs, from its own root.
+            val web = offered(base.resolve("apps/web")).single()
+            assertEquals(FileUtil.toSystemIndependentName(base.resolve("apps/web").toString()), web.workingDirectory)
+            assertEquals("", web.paths)
+            // And the outer scan leaves the nested project's files to it.
+            assertEmpty(SaffronProjectScan.scan(base.toString()).files)
+        } finally {
+            Files.deleteIfExists(base.resolve("saffron.config.json"))
+            base.resolve("apps").toFile().deleteRecursively()
+            SaffronStatusService.getInstance(project).discoverRoots()
+        }
+    }
+
+    fun `test a configuration saved with a blank working directory is found again, not duplicated`() {
+        val base = Path.of(project.basePath!!)
+        val runManager = RunManager.getInstance(project)
+        val settings = runManager.createConfiguration("Run login.saffron", SaffronConfigurationType.INSTANCE.factory)
+        try {
+            Files.createDirectories(base.resolve("features"))
+            Files.writeString(base.resolve("saffron.config.json"), "{}")
+            Files.writeString(base.resolve("features/login.saffron"), "Feature: Login\n\nScenario: Works\n    Given x\n")
+            // What 0.3.2 wrote: no working directory, paths from the project directory.
+            (settings.configuration as SaffronRunConfiguration).apply { command = "run"; workingDirectory = null; paths = "features/login.saffron" }
+            runManager.addConfiguration(settings)
+            val vf = LocalFileSystem.getInstance().refreshAndFindFileByNioFile(base.resolve("features/login.saffron"))!!
+            IndexingTestUtil.waitUntilIndexesAreReady(project)
+            val dataContext = SimpleDataContext.builder()
+                .add(CommonDataKeys.PROJECT, project)
+                .add(Location.DATA_KEY, PsiLocation(PsiManager.getInstance(project).findFile(vf)!!))
+                .build()
+            assertSame(settings, ConfigurationContext.getFromContext(dataContext, ActionPlaces.UNKNOWN).findExisting())
+        } finally {
+            runManager.removeConfiguration(settings)
+            Files.deleteIfExists(base.resolve("saffron.config.json"))
+            base.resolve("features").toFile().deleteRecursively()
+        }
+    }
+
+    fun `test a relative working directory is taken from the project directory and must exist`() {
+        val base = Path.of(project.basePath!!)
+        val c = newConfiguration()
+        c.command = "run"
+        c.workingDirectory = "apps/web"
+        val expected = base.resolve("apps/web").toString()
+        assertEquals(expected, c.resolvedWorkingDirectory)
+        assertEquals(expected, SaffronCommand.forConfiguration(c).workDirectory?.path)
+        assertThrows(RuntimeConfigurationError::class.java, "does not exist", ThrowableRunnable<Throwable> { c.checkConfiguration() })
+        try {
+            Files.createDirectories(base.resolve("apps/web"))
+            c.checkConfiguration()
+        } finally {
+            base.resolve("apps").toFile().deleteRecursively()
+        }
     }
 
     fun `test a plain text file offers no Saffron configuration`() {
@@ -268,6 +362,22 @@ class SaffronRunConfigurationTest : BasePlatformTestCase() {
         assertEmpty(Gson().fromJson("{}", ProjectStatus::class.java).unreadableProposals)
     }
 
+    fun `test a folder of plain Gherkin feature files is not a Saffron project`() {
+        val top = Files.createTempDirectory("saffron-cucumber")
+        try {
+            Files.createDirectories(top.resolve("features"))
+            Files.writeString(top.resolve("features/x.feature"), "Feature: X\n\nScenario: Y\n  Given z\n")
+            assertFalse(SaffronProjectScan.isSaffronProject(top.toString()))
+            assertEmpty(SaffronRoots.discover(top))
+            Files.writeString(top.resolve("features/x.saffron"), "Feature: X\n\nExample: Y\n  Given z\n")
+            assertTrue(SaffronProjectScan.isSaffronProject(top.toString()))
+            // Example: is a scenario to the runner too.
+            assertEquals(1, SaffronProjectScan.scan(top.toString()).files.single { it.relativePath == "features/x.saffron" }.scenarios)
+        } finally {
+            top.toFile().deleteRecursively()
+        }
+    }
+
     fun `test discover finds every nested project and falls back to the root`() {
         val top = Files.createTempDirectory("saffron-roots")
         try {
@@ -318,6 +428,7 @@ class SaffronRunConfigurationTest : BasePlatformTestCase() {
             Files.writeString(nested.resolve("saffron.config.json"), "{}")
             Files.writeString(nested.resolve("features/cart.feature"), "Feature: Cart\n\nScenario: Add\n    Given x\n")
             val vf = LocalFileSystem.getInstance().refreshAndFindFileByNioFile(nested.resolve("features/cart.feature"))!!
+            IndexingTestUtil.waitUntilIndexesAreReady(project)
             val file = PsiManager.getInstance(project).findFile(vf)!!
             val dataContext = SimpleDataContext.builder()
                 .add(CommonDataKeys.PROJECT, project)

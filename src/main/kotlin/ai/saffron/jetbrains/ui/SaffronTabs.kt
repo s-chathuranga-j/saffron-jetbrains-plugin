@@ -375,7 +375,8 @@ class DashboardTab(project: Project, parent: Disposable) : StatusTab(project, pa
 
     /**
      * The panel shows the report and nothing else: web links open in the
-     * system browser, popups too, and any other navigation is cancelled.
+     * system browser, popups too, and any other navigation is cancelled. A
+     * screenshot link (a data: or file: popup) opens here instead.
      */
     private fun keepToReport(b: JBCefBrowser) {
         fun allowed(url: String): Boolean {
@@ -393,7 +394,8 @@ class DashboardTab(project: Project, parent: Disposable) : StatusTab(project, pa
         }, b.cefBrowser)
         b.jbCefClient.addLifeSpanHandler(object : CefLifeSpanHandlerAdapter() {
             override fun onBeforePopup(browser: CefBrowser?, frame: CefFrame?, targetUrl: String?, targetFrameName: String?): Boolean {
-                targetUrl?.let(::allowed)
+                val url = targetUrl ?: return true
+                if (url.startsWith("data:", true) || url.startsWith("file:", true)) browser?.loadURL(url) else allowed(url)
                 return true
             }
         }, b.cefBrowser)

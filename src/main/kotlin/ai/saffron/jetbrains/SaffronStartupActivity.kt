@@ -1,13 +1,12 @@
 package ai.saffron.jetbrains
 
-import ai.saffron.jetbrains.ui.SaffronRoots
+import ai.saffron.jetbrains.ui.SaffronStatusService
 import com.intellij.ide.util.PropertiesComponent
 import com.intellij.notification.NotificationGroupManager
 import com.intellij.notification.NotificationType
 import com.intellij.openapi.project.Project
 import com.intellij.openapi.startup.ProjectActivity
 import java.nio.file.Files
-import java.nio.file.Path
 
 /**
  * A Saffron project without the npm package installed gets no language
@@ -16,8 +15,8 @@ import java.nio.file.Path
  */
 class SaffronStartupActivity : ProjectActivity {
     override suspend fun execute(project: Project) {
-        val base = project.basePath?.let(Path::of) ?: return
-        val roots = SaffronRoots.discover(base).filter { Files.exists(it.resolve("saffron.config.json")) }
+        // Runs off the EDT: fills the roots the language server and run menu read.
+        val roots = SaffronStatusService.getInstance(project).discoverRoots().filter { Files.exists(it.resolve("saffron.config.json")) }
         if (roots.isEmpty()) return
 
         // LSP4IJ is an optional dependency: without it the plugin still loads,

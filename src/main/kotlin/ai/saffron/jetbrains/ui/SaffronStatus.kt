@@ -5,6 +5,7 @@ import com.google.gson.Gson
 import com.google.gson.JsonObject
 import com.intellij.execution.configurations.GeneralCommandLine
 import com.intellij.execution.util.ExecUtil
+import com.intellij.ide.trustedProjects.TrustedProjectsListener
 import com.intellij.ide.util.PropertiesComponent
 import com.intellij.openapi.Disposable
 import com.intellij.openapi.application.ApplicationManager
@@ -209,10 +210,26 @@ class SaffronStatusService(private val project: Project) : Disposable {
     var latest: StatusLoad = StatusLoad(null, null)
         private set
 
-    /** Saffron projects under the IDE root, as last discovered. */
+    /** Saffron projects under the IDE root, as last discovered; empty until [discoverRoots] first runs. */
     @Volatile
-    var roots: List<Path> = project.basePath?.let { SaffronRoots.discover(Path.of(it)) } ?: emptyList()
+    var roots: List<Path> = emptyList()
         private set
+
+    /** Walks the file system: call off the EDT. */
+    fun discoverRoots(): List<Path> =
+        (project.basePath?.let { SaffronRoots.discover(Path.of(it)) } ?: emptyList()).also { roots = it }
+
+    init {
+        // Load once the project is trusted, not only at the next refresh.
+        ApplicationManager.getApplication().messageBus.connect(this).subscribe(
+            TrustedProjectsListener.TOPIC,
+            object : TrustedProjectsListener {
+                override fun onProjectTrusted(project: Project) {
+                    if (project == this@SaffronStatusService.project) refresh()
+                }
+            },
+        )
+    }
 
     /** The project the tool window shows: the one chosen when there are several, else the only one, else the IDE root. */
     val root: Path
@@ -241,7 +258,7 @@ class SaffronStatusService(private val project: Project) : Disposable {
             return
         }
         try {
-            project.basePath?.let { roots = SaffronRoots.discover(Path.of(it)) }
+            discoverRoots()
             val result = if (SaffronCommand.trusted(project)) runStatus(root.toString()) else StatusLoad(null, UNTRUSTED)
             latest = result
             ApplicationManager.getApplication().invokeLater(
