@@ -55,6 +55,14 @@ internal fun screenshotToShow(base: String, shot: StatusEvidence, scenario: Stri
     return Screenshot(file = vf)
 }
 
+/** A Last Run row's tooltip: after an import the report's text comes from CI, so it is escaped. */
+internal fun attentionTooltip(a: StatusAttention, screenshot: Boolean): String? = tooltipHtml(
+    "${a.feature} › ${a.scenario}",
+    a.failedStep?.let { "Failed step: $it" },
+    a.error,
+    if (screenshot) "Double-click to open the screenshot." else "No screenshot for this one; double-click opens the scenario.",
+)
+
 private class RunRow(
     val label: String,
     val detail: String = "",
@@ -146,12 +154,7 @@ class LastRunTab(project: Project, parent: Disposable) : StatusTab(project, pare
                             a.scenario,
                             a.failedStep ?: a.feature,
                             if (shot != null) AllIcons.FileTypes.Image else icon,
-                            listOfNotNull(
-                                "${a.feature} › ${a.scenario}",
-                                a.failedStep?.let { "Failed step: $it" },
-                                a.error,
-                                if (shot != null) "Double-click to open the screenshot." else "No screenshot for this one; double-click opens the scenario.",
-                            ).joinToString("\n"),
+                            attentionTooltip(a, shot != null),
                             a,
                         ),
                     ),

@@ -331,13 +331,17 @@ class SaffronStatusService(private val project: Project) : Disposable {
 
 /**
  * The line of a runner's stderr that says what went wrong: an `Error:` line
- * or one of saffron's own, not Node's crash trailer (`Node.js v22`) or a
- * stack frame.
+ * or one of saffron's own, else one that mentions an error (`npm error ...`,
+ * commander's `error: ...`). Never Node's crash trailer (`Node.js v22`), a
+ * stack frame, or an npm or Node warning.
  */
 internal fun runnerError(stderr: String): String {
     val lines = stderr.lines().map { it.trim() }.filter { it.isNotEmpty() }
+    val noise = Regex("""^(Node\.js v|at |npm warn|\(node:\d+\)|Warning:)""", RegexOption.IGNORE_CASE)
+    val rest = lines.filterNot { noise.containsMatchIn(it) }
     return lines.firstOrNull { it.contains("Error:") || it.startsWith("saffron") }
-        ?: lines.firstOrNull { !it.startsWith("Node.js v") && !it.startsWith("at ") }
+        ?: rest.firstOrNull { it.contains("error", ignoreCase = true) }
+        ?: rest.firstOrNull()
         ?: lines.lastOrNull().orEmpty()
 }
 

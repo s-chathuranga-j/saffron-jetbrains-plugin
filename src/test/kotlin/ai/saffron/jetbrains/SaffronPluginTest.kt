@@ -5,7 +5,9 @@ import ai.saffron.jetbrains.ui.LastRunTab
 import ai.saffron.jetbrains.ui.RunNode
 import ai.saffron.jetbrains.ui.ProposalsTab
 import ai.saffron.jetbrains.ui.SaffronStatusService
+import ai.saffron.jetbrains.ui.StatusAttention
 import ai.saffron.jetbrains.ui.StatusProposal
+import ai.saffron.jetbrains.ui.attentionTooltip
 import ai.saffron.jetbrains.ui.checkedCopy
 import ai.saffron.jetbrains.ui.currentEvidence
 import ai.saffron.jetbrains.ui.evidenceCopies
@@ -21,6 +23,7 @@ import com.intellij.openapi.fileEditor.FileEditorManager
 import com.intellij.openapi.fileTypes.FileTypeManager
 import com.intellij.openapi.fileTypes.PlainTextFileType
 import com.intellij.openapi.fileTypes.UnknownFileType
+import com.intellij.openapi.util.Disposer
 import com.intellij.openapi.util.SystemInfo
 import com.intellij.testFramework.PlatformTestUtil
 import com.intellij.testFramework.TestActionEvent
@@ -413,6 +416,8 @@ class SaffronPluginTest : BasePlatformTestCase() {
             trust = true
             SaffronStatusService.getInstance(project).refresh()
             PlatformTestUtil.waitWithEventsDispatching("the runs never loaded", { runRows(tab).map { it.toString() } == listOf("e2e #7") }, 60)
+            // The untrusted note went with the trust.
+            assertEquals("", UIUtil.findComponentsOfType(tab, JBLabel::class.java).single().text)
         } finally {
             base.resolve("node_modules").toFile().deleteRecursively()
         }
@@ -460,9 +465,112 @@ class SaffronPluginTest : BasePlatformTestCase() {
         }
     }
 
+    /** A stand-in `saffron` in [dir] from a whole shell `case` body. */
+    private fun standInCases(dir: Path, cases: String) {
+        val bin = dir.resolve("node_modules/.bin/saffron")
+        Files.createDirectories(bin.parent)
+        Files.writeString(bin, "#!/bin/sh\ncase \"\$1\" in\n$cases\n  *) echo '{\"packageInstalled\":true}' ;;\nesac\n")
+        bin.toFile().setExecutable(true)
+    }
+
+    fun `test CI Runs imports a run once even across a project switch`() {
+        if (SystemInfo.isWindows) return
+        val base = Path.of(project.basePath!!)
+        val a = base.resolve("a")
+        val b = base.resolve("b")
+        val service = SaffronStatusService.getInstance(project)
+        // The import runs as a background task, here too.
+        System.setProperty("intellij.progress.task.ignoreHeadless", "true")
+        try {
+            for (dir in listOf(a, b)) {
+                Files.createDirectories(dir)
+                Files.writeString(dir.resolve("saffron.config.json"), "{}")
+            }
+            val log = a.resolve("imports.log")
+            val runs = """echo '{"provider":"github","runs":[{"id":"1","name":"a","number":"1","status":"completed","conclusion":"failure"}]}'"""
+            standInCases(a, "  runs) $runs ;;\n  import) echo x >> '$log'; sleep 3; echo '{\"proposals\":[]}' ;;")
+            standIn(b, """echo '{"provider":"github","runs":[]}'""")
+            service.choose(a)
+            val tab = CiRunsTab(project, testRootDisposable)
+            val tree = UIUtil.findComponentOfType(tab, Tree::class.java)!!
+            fun names() = runRows(tab).map { it.toString() }
+            PlatformTestUtil.waitWithEventsDispatching("a never listed", { names() == listOf("a #1") }, 60)
+            tree.selectionPath = TreePath(runRows(tab)[0].path)
+            press(tab, "Import Run")
+            PlatformTestUtil.waitWithEventsDispatching("the import never started", { Files.exists(log) }, 30)
+
+            service.choose(b)
+            PlatformTestUtil.waitWithEventsDispatching("b never shown", { names().isEmpty() }, 60)
+            service.choose(a)
+            PlatformTestUtil.waitWithEventsDispatching("a never listed again", { names() == listOf("a #1") }, 60)
+            // Still in flight: a second Import Run starts nothing.
+            tree.selectionPath = TreePath(runRows(tab)[0].path)
+            press(tab, "Import Run")
+            PlatformTestUtil.waitWithEventsDispatching("the import never finished", { runRows(tab).firstOrNull()?.childCount == 1 }, 60)
+            assertEquals(1, Files.readAllLines(log).size)
+        } finally {
+            System.clearProperty("intellij.progress.task.ignoreHeadless")
+            PropertiesComponent.getInstance(project).unsetValue("ai.saffron.jetbrains.root")
+            a.toFile().deleteRecursively()
+            b.toFile().deleteRecursively()
+            service.discoverRoots()
+        }
+    }
+
+    fun `test CI Runs Refresh twice runs at most one more list, and the later answer wins`() {
+        if (SystemInfo.isWindows) return
+        val base = Path.of(project.basePath!!)
+        val log = base.resolve("runs.log")
+        try {
+            // Each list names itself by how many came before it.
+            standIn(base, """echo x >> '$log'; n=${'$'}(wc -l < '$log' | tr -d ' '); sleep 2; echo '{"provider":"github","runs":[{"id":"1","name":"r'${'$'}n'","number":"1","status":"completed"}]}'""")
+            val tab = CiRunsTab(project, testRootDisposable)
+            PlatformTestUtil.waitWithEventsDispatching("the first list never started", { Files.exists(log) }, 30)
+            press(tab, "Refresh")
+            press(tab, "Refresh")
+            PlatformTestUtil.waitWithEventsDispatching("the follow-up never listed", { runRows(tab).map { it.toString() } == listOf("r2 #1") }, 60)
+            val until = System.currentTimeMillis() + 3_000
+            PlatformTestUtil.waitWithEventsDispatching("", { System.currentTimeMillis() > until }, 10)
+            assertEquals(2, Files.readAllLines(log).size)
+            assertEquals(listOf("r2 #1"), runRows(tab).map { it.toString() })
+        } finally {
+            base.resolve("node_modules").toFile().deleteRecursively()
+            Files.deleteIfExists(log)
+        }
+    }
+
+    fun `test CI Runs stops its CLI process when the project closes`() {
+        if (SystemInfo.isWindows) return
+        val base = Path.of(project.basePath!!)
+        val pid = base.resolve("runs.pid")
+        val closed = Disposer.newDisposable()
+        Disposer.register(testRootDisposable, closed)
+        try {
+            standIn(base, "echo ${'$'}${'$'} > '$pid'; exec sleep 60")
+            CiRunsTab(project, closed)
+            PlatformTestUtil.waitWithEventsDispatching("saffron runs never started", { Files.exists(pid) && Files.readString(pid).isNotBlank() }, 30)
+            val process = ProcessHandle.of(Files.readString(pid).trim().toLong()).get()
+            Disposer.dispose(closed)
+            PlatformTestUtil.waitWithEventsDispatching("saffron runs outlived the project", { !process.isAlive }, 10)
+        } finally {
+            base.resolve("node_modules").toFile().deleteRecursively()
+            Files.deleteIfExists(pid)
+        }
+    }
+
     fun `test CI text in a tooltip is escaped, and runner errors and ages read plainly`() {
         assertEquals("<html>&lt;html&gt;&lt;img src=x&gt;<br>a b</html>", tooltipHtml("<html><img src=x>", null, "a\u0007b"))
         assertNull(tooltipHtml(null))
+        // Last Run: an imported report's feature is CI text too.
+        val tip = attentionTooltip(StatusAttention(feature = "<html><img src=x>", scenario = "Buy", error = "boom"), false)!!
+        assertEquals("<html>&lt;html&gt;&lt;img src=x&gt; › Buy<br>boom<br>No screenshot for this one; double-click opens the scenario.</html>", tip)
+
+        // npm and Node warnings are not the error; a line that names one is.
+        assertEquals(
+            "npm error could not determine executable to run",
+            runnerError("npm warn exec The following package was not found and will be installed: saffron-ai\nnpm error could not determine executable to run\nnpm error A complete log of this run can be found in: /tmp/x.log"),
+        )
+        assertEquals("error: unknown option '--json'", runnerError("(node:4242) Warning: something old\nWarning: another\nerror: unknown option '--json'"))
 
         val crash = "/app/node_modules/saffron-ai/dist/cli.js:12\n    throw e;\n    ^\n\nError: Cannot find module 'x'\n    at Module._load (node:internal)\n\nNode.js v22.3.0"
         assertEquals("Error: Cannot find module 'x'", runnerError(crash))

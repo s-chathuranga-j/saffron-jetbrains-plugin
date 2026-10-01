@@ -2,12 +2,16 @@ package ai.saffron.jetbrains.ui
 
 import ai.saffron.jetbrains.run.SaffronCommand
 import com.google.gson.Gson
-import com.intellij.execution.util.ExecUtil
+import com.intellij.execution.process.CapturingProcessHandler
+import com.intellij.execution.process.ProcessOutput
 import com.intellij.icons.AllIcons
 import com.intellij.ide.BrowserUtil
 import com.intellij.openapi.Disposable
 import com.intellij.openapi.application.ApplicationManager
+import com.intellij.openapi.progress.ProgressIndicator
+import com.intellij.openapi.progress.Task
 import com.intellij.openapi.project.Project
+import com.intellij.openapi.util.Disposer
 import com.intellij.openapi.util.text.StringUtil
 import com.intellij.ui.ColoredTreeCellRenderer
 import com.intellij.ui.SimpleTextAttributes
@@ -17,6 +21,7 @@ import java.awt.BorderLayout
 import java.nio.file.Path
 import java.time.Duration
 import java.time.Instant
+import java.util.concurrent.ConcurrentHashMap
 import javax.swing.Icon
 import javax.swing.JPanel
 import javax.swing.JTree
@@ -60,18 +65,23 @@ class RunImport(
 /**
  * `saffron <args>` in a project, its output read as JSON whatever the exit
  * code: the runner prints its JSON for a refusal or a problem too. Without
- * JSON, the reason: a runner that predates the command says so.
+ * JSON, the reason: a runner that predates the command says so. [run]
+ * starts the process and waits for it.
  */
-internal fun <T> saffronJson(base: String, type: Class<T>, vararg args: String): Pair<T?, String?> {
+internal fun <T> saffronJson(
+    base: String,
+    type: Class<T>,
+    vararg args: String,
+    run: (CapturingProcessHandler) -> ProcessOutput,
+): Pair<T?, String?> {
     return try {
-        // Longer than the runner's own 10 minutes for one gh or az call, so its message arrives first.
-        val output = ExecUtil.execAndGetOutput(SaffronCommand.base(base).withParameters(*args), 900_000)
+        val output = run(CapturingProcessHandler(SaffronCommand.base(base).withParameters(*args)).apply { setShouldDestroyProcessRecursively(true) })
         val parsed = output.stdout.takeIf { it.isNotBlank() }?.let { runCatching { Gson().fromJson(it, type) }.getOrNull() }
         if (parsed != null) return parsed to null
         val command = args.firstOrNull().orEmpty()
         val said = output.stderr.trim()
         null to when {
-            output.isTimeout -> "saffron $command was stopped after 15 minutes. Run it in a terminal to see where it waits."
+            output.isTimeout -> "saffron $command was stopped after 30 minutes. Run it in a terminal to see where it waits."
             Regex("unknown command '?$command").containsMatchIn(said) -> "This saffron-ai has no saffron $command: update it (npm i -D saffron-ai@latest)."
             said.isNotEmpty() -> runnerError(said)
             else -> "saffron $command exited with ${output.exitCode}"
@@ -145,10 +155,20 @@ class CiRunsTab(
     private var listed: CiRuns? = null
     private var listedFor: Path? = null
     private val imports = mutableMapOf<String, RunImport>()
+    /** Imports in flight, as "root|run id": a project switch does not forget them, only their own end does. */
     private val importing = mutableSetOf<String>()
     private var latest: ProjectStatus? = null
-    /** The root whose runs are being listed. */
-    private var loadingFor: Path? = null
+    /** The root the rows and notes belong to. */
+    private var shownFor: Path? = null
+    /** Per root: the number of its latest `saffron runs`; an older answer is dropped. */
+    private val loads = mutableMapOf<Path, Int>()
+    private var loadCount = 0
+    /** Roots with `saffron runs` in flight, and those whose Refresh waits for it. */
+    private val loading = mutableSetOf<Path>()
+    private val again = mutableSetOf<Path>()
+    /** CLI processes in flight: destroyed when the tab goes with its project. */
+    private val processes = ConcurrentHashMap.newKeySet<CapturingProcessHandler>()
+    @Volatile private var disposed = false
     /** The tab's own message (an import's summary): it outlasts status reloads until the selection changes. */
     private var ownNote: String? = null
     /** Set while [rebuild] replaces the rows: that selection change is not the user's. */
@@ -173,6 +193,10 @@ class CiRunsTab(
             add(note, BorderLayout.NORTH)
             add(JBScrollPane(tree), BorderLayout.CENTER)
         })
+        Disposer.register(parent) {
+            disposed = true
+            processes.forEach { it.destroyProcess() }
+        }
         // Its first render lists the runs.
         start()
     }
@@ -181,7 +205,18 @@ class CiRunsTab(
         latest = status
         ownNote?.let { note.text = it }
         // Not listed yet (trust granted since), or another project chosen: its runs, never the last project's.
-        if (listedFor != projectRoot && loadingFor != projectRoot) loadRuns() else rebuild()
+        if (listedFor != projectRoot) loadRuns(refresh = false) else rebuild()
+    }
+
+    /** Runs [wait] on a process the tab can destroy on disposal; forgets it once done. */
+    private fun tracked(wait: (CapturingProcessHandler) -> ProcessOutput): (CapturingProcessHandler) -> ProcessOutput = { handler ->
+        processes += handler
+        try {
+            if (disposed) handler.destroyProcess()
+            wait(handler)
+        } finally {
+            processes -= handler
+        }
     }
 
     private fun say(text: String) {
@@ -189,30 +224,48 @@ class CiRunsTab(
         note.text = text
     }
 
-    private fun loadRuns() {
+    /** `saffron runs` for the shown root. [refresh]: the user asked, so a list already in flight is followed by one more. */
+    private fun loadRuns(refresh: Boolean = true) {
         if (!trusted()) {
             tree.emptyText.text = SaffronStatusService.UNTRUSTED
             return
         }
         val base = projectRoot
-        if (listedFor != base) {
-            // Another project: nothing of the last one's stays, to be imported here.
+        if (shownFor != base) {
+            // Another project, or trust granted: nothing of before stays, to be imported or read here.
+            shownFor = base
             listed = null
             listedFor = null
             imports.clear()
-            importing.clear()
             ownNote = null
+            clearNote()
             root.removeAllChildren()
             model.reload()
         }
-        loadingFor = base
         tree.emptyText.text = "Loading…"
+        if (base in loading) {
+            if (refresh) again.add(base)
+            return
+        }
+        loading.add(base)
+        val load = ++loadCount
+        loads[base] = load
         ApplicationManager.getApplication().executeOnPooledThread {
-            val (runs, problem) = saffronJson(base.toString(), CiRuns::class.java, "runs", "--json")
+            // The runner gives each gh or az call 10 minutes and may make several: 30 minutes stops only one that hangs.
+            val (runs, problem) = saffronJson(base.toString(), CiRuns::class.java, "runs", "--json", run = tracked { it.runProcess(30 * 60_000, true) })
             ApplicationManager.getApplication().invokeLater({
-                if (loadingFor == base) loadingFor = null
-                // Listed for a project no longer shown: dropped.
-                if (base != projectRoot) return@invokeLater
+                loading.remove(base)
+                // Not the latest list of this root, or listed for a project no longer shown: dropped.
+                if (loads[base] != load) return@invokeLater
+                if (base != projectRoot) {
+                    again.remove(base)
+                    return@invokeLater
+                }
+                // A Refresh came meanwhile: its answer, not this one.
+                if (again.remove(base)) {
+                    loadRuns()
+                    return@invokeLater
+                }
                 listed = runs ?: CiRuns(problem = CiProblem("failed", problem ?: "saffron runs gave no answer"))
                 listedFor = base
                 rebuild()
@@ -325,16 +378,31 @@ class CiRunsTab(
             say("Select a run to import.")
             return
         }
-        if (run.id in importing) return
-        importing += run.id
-        say("Importing ${run.name} #${run.number}…")
         val base = projectRoot
-        ApplicationManager.getApplication().executeOnPooledThread {
-            val (result, problem) = saffronJson(base.toString(), RunImport::class.java, "import", "--run", run.id, "--json")
-            ApplicationManager.getApplication().invokeLater({
-                importing -= run.id
+        val key = "$base|${run.id}"
+        if (key in importing) return
+        importing += key
+        say("Importing ${run.name} #${run.number}…")
+        // No time limit: a slow download that would finish is not killed. Cancel in the progress bar stops it.
+        object : Task.Backgroundable(project, "Importing ${run.name} #${run.number}", true) {
+            private var answer: Pair<RunImport?, String?> = null to null
+
+            override fun run(indicator: ProgressIndicator) {
+                answer = saffronJson(base.toString(), RunImport::class.java, "import", "--run", run.id, "--json", run = tracked { it.runProcessWithProgressIndicator(indicator) })
+            }
+
+            override fun onCancel() {
+                if (base == projectRoot) say("The import was cancelled.")
+            }
+
+            override fun onFinished() {
+                importing -= key
+            }
+
+            override fun onSuccess() {
                 // Imported into a project no longer shown: its rows are not these.
-                if (base != projectRoot) return@invokeLater
+                if (base != projectRoot) return
+                val (result, problem) = answer
                 val outcome = result ?: RunImport(error = problem)
                 imports[run.id] = outcome
                 say(summary(outcome, run))
@@ -345,8 +413,8 @@ class CiRunsTab(
                 }
                 // The proposals, the report and the evidence changed on disk.
                 refreshStatus()
-            }, project.disposed)
-        }
+            }
+        }.queue()
     }
 
     private fun summary(result: RunImport, run: CiRun): String {
