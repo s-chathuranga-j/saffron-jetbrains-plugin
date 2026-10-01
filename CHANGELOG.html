@@ -1,3 +1,8 @@
+<h3>0.4.0</h3>
+<ul>
+  <li><b>CI Runs tab.</b> The current branch's CI runs, GitHub Actions or Azure Pipelines, through <code>saffron runs</code>. <b>Import</b> runs <code>saffron import --run</code> and lists under the run what happened to each proposal and any warning. The Proposals tab names the CI run an imported proposal came from. From a red CI run to an accepted repair without leaving the IDE; the CI's own tool keeps the credentials. Needs the <code>saffron-ai</code> release after 0.9.2, with <code>gh</code> or <code>az</code> signed in.</li>
+  <li><b>Text from CI is shown as plain text</b>, in CI Runs and in Last Run after an import, never as markup. Import is a background task you can cancel; a run is imported once even if you switch projects meanwhile; Refresh never starts a second list. The tab loads as soon as the project is trusted, and its processes stop when the project closes.</li>
+</ul>
 <h3>0.3.1</h3>
 <ul>
   <li><b>The tool window opens on IntelliJ 2026.2.</b> The Dashboard tab no longer fails with NoClassDefFoundError (JBCefApp): 2026.2 moved the embedded browser into its own plugin, which Saffron now depends on where it exists. Without it the Dashboard offers Open in Browser.</li>
