@@ -61,6 +61,8 @@ class StatusProposal(
     val costUsd: Double? = null,
     /** sha256 of the file as listed; absent from runners before 0.9.0. */
     val revision: String? = null,
+    /** The CI run `saffron import` brought this very proposal from; absent for one filed here. */
+    val importedFrom: ImportedFrom? = null,
 ) {
     /**
      * What accept and reject are given: the file bound to the revision shown,
@@ -69,6 +71,31 @@ class StatusProposal(
      */
     val target: String get() = if (revision != null) "$file#$revision" else file
 }
+
+/** Where an imported proposal came from: the run ("github:901") and its link, the branch and commit, the shard. */
+class ImportedFrom(
+    val repository: String? = null,
+    val branch: String? = null,
+    val commit: String? = null,
+    val run: String? = null,
+    val attempt: String? = null,
+    val url: String? = null,
+    val shard: ImportedShard? = null,
+) {
+    /** "from run 901", for a row. */
+    val label: String
+        get() = run?.substringAfter(':')?.takeIf { it.isNotBlank() }?.let { "from run $it" } ?: "imported"
+
+    /** "imported from run github:901 (https://...) on main @ 1a2b3c4 · shard 2 of 4", for the details. */
+    val description: String
+        get() = listOfNotNull(
+            "imported from run ${run ?: "(no CI run recorded)"}" + (url?.takeIf { it.startsWith("https://") || it.startsWith("http://") }?.let { " ($it)" } ?: ""),
+            if (branch != null || commit != null) "on ${branch ?: "a detached HEAD"}" + (commit?.let { " @ ${it.take(7)}" } ?: "") else null,
+            shard?.let { "shard ${it.index} of ${it.total}" },
+        ).joinToString(" · ")
+}
+
+class ImportedShard(val index: Int = 0, val total: Int = 0)
 
 class StatusTotals(
     val scenarios: Int = 0,

@@ -171,7 +171,7 @@ class ProposalsTab(project: Project, parent: Disposable) : StatusTab(project, pa
                 false -> "UNVERIFIED"
                 null -> "unchecked"
             }
-            val state = if (p.stale != null) "STALE · $verified" else "${p.mode} · $verified"
+            val state = (if (p.stale != null) "STALE · $verified" else "${p.mode} · $verified") + (p.importedFrom?.let { " · ${it.label}" } ?: "")
             list.addItem(p, "${p.feature.substringAfterLast('/')} › ${p.scenario}   $state", p.target in ticked)
         }
         if (items.isEmpty()) details.text = ""
@@ -250,6 +250,7 @@ class ProposalsTab(project: Project, parent: Disposable) : StatusTab(project, pa
         b.append("mode: ").append(p.mode).append(" · created ").append(p.createdAt)
         if (p.recordedFor != null) b.append(" · recorded for ").append(p.recordedFor)
         b.append('\n')
+        p.importedFrom?.let { b.append(it.description).append('\n') }
         p.stale?.let { b.append("STALE, cannot be accepted: ").append(it).append(". Run the scenario again for a fresh proposal, or reject this one.\n") }
         if (p.unbound == true) b.append("Filed by an older runner: changes to the scenario or the recording since cannot be detected.\n")
         b.append("proof replay: ").append(

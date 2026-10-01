@@ -1,6 +1,8 @@
 package ai.saffron.jetbrains
 
+import ai.saffron.jetbrains.ui.CiRunsTab
 import ai.saffron.jetbrains.ui.LastRunTab
+import ai.saffron.jetbrains.ui.RunNode
 import ai.saffron.jetbrains.ui.ProposalsTab
 import ai.saffron.jetbrains.ui.SaffronStatusService
 import ai.saffron.jetbrains.ui.StatusProposal
@@ -248,6 +250,84 @@ class SaffronPluginTest : BasePlatformTestCase() {
             SaffronStatusService.getInstance(project).refresh()
             PlatformTestUtil.waitWithEventsDispatching("the replacement never loaded", { row()?.revision == "b".repeat(64) }, 60)
             assertFalse(list.isItemSelected(row()!!))
+        } finally {
+            made.forEach { it.toFile().deleteRecursively() }
+        }
+    }
+
+    /**
+     * The CI Runs tab against a stand-in `saffron`: the runs `saffron runs`
+     * prints, the pending count the status gives, an import whose outcome
+     * lands under its run, and the Proposals tab naming the run a proposal
+     * came from.
+     */
+    fun `test CI Runs lists saffron runs and imports one with saffron import --run`() {
+        // The stand-in below is a shell script.
+        if (SystemInfo.isWindows) return
+        val base = Path.of(project.basePath!!)
+        val made = listOf(base.resolve("node_modules"), base.resolve(".saffron"))
+        try {
+            val dir = base.resolve(".saffron")
+            Files.createDirectories(dir)
+            val runs = dir.resolve("runs.json")
+            Files.writeString(
+                runs,
+                """{"provider":"azure","branch":"feature/login","runs":[""" +
+                    """{"id":"41","name":"e2e","number":"20261001.41","status":"completed","conclusion":"failure","branch":"feature/login","commit":"abc1234","url":"https://dev.azure.com/acme/shop/_build/results?buildId=41","pending":0},""" +
+                    """{"id":"40","name":"e2e","number":"20261001.40","status":"in_progress","pending":0}]}""",
+            )
+            val imported = dir.resolve("import.json")
+            Files.writeString(
+                imported,
+                """{"warnings":["this checkout is 1 commit behind"],"proposals":[""" +
+                    """{"file":".saffron/proposals/login-saffron/sign-in.json","feature":"features/login.saffron","scenario":"Sign in","outcome":"imported"},""" +
+                    """{"file":".saffron/proposals/cart-saffron/add.json","feature":"features/cart.saffron","scenario":"Add to cart","outcome":"refused","reason":"does not fit this checkout"}]}""",
+            )
+            val status = dir.resolve("status.json")
+            Files.writeString(
+                status,
+                """{"packageInstalled":true,"proposals":[{"file":".saffron/proposals/login-saffron/sign-in.json","feature":"features/login.saffron",""" +
+                    """"scenario":"Sign in","mode":"heal","verified":true,"revision":"${"a".repeat(64)}",""" +
+                    """"importedFrom":{"run":"azure:41","url":"https://dev.azure.com/acme/shop/_build/results?buildId=41","branch":"feature/login","commit":"abc1234def"}}]}""",
+            )
+            val log = dir.resolve("calls.log")
+            val bin = base.resolve("node_modules/.bin/saffron")
+            Files.createDirectories(bin.parent)
+            Files.writeString(bin, "#!/bin/sh\necho \"\$*\" >> '$log'\ncase \"\$1\" in\n  runs) cat '$runs' ;;\n  import) cat '$imported'; exit 1 ;;\n  *) cat '$status' ;;\nesac\n")
+            bin.toFile().setExecutable(true)
+
+            val tab = CiRunsTab(project, testRootDisposable)
+            val tree = UIUtil.findComponentOfType(tab, Tree::class.java)!!
+            fun runRows() = (0 until tree.model.getChildCount(tree.model.root)).map { tree.model.getChild(tree.model.root, it) as DefaultMutableTreeNode }
+            fun detail(node: DefaultMutableTreeNode) = (node.userObject as RunNode).detail
+            PlatformTestUtil.waitWithEventsDispatching("the runs never loaded", { runRows().size == 2 }, 60)
+            assertEquals(listOf("e2e #20261001.41", "e2e #20261001.40"), runRows().map { it.toString() })
+            // The status's notes count the run's proposal pending here.
+            PlatformTestUtil.waitWithEventsDispatching("the status never counted", { detail(runRows()[0]).contains("1 proposal pending here") }, 60)
+            assertTrue(detail(runRows()[0]), detail(runRows()[0]).startsWith("failure"))
+            assertTrue(detail(runRows()[1]), detail(runRows()[1]).startsWith("in progress"))
+
+            tree.selectionPath = TreePath(runRows()[0].path)
+            val toolbar = UIUtil.findComponentOfType(tab.toolbar as JComponent, ActionToolbarImpl::class.java)!!
+            val importRun = (toolbar.actionGroup as DefaultActionGroup).childActionsOrStubs.single { it.templateText == "Import Run" }
+            importRun.actionPerformed(TestActionEvent.createTestEvent(importRun))
+            PlatformTestUtil.waitWithEventsDispatching("the import never finished", { runRows()[0].childCount == 3 }, 60)
+            assertTrue(Files.readString(log).lines().contains("import --run 41 --json"))
+            val outcomes = (0 until 3).map { runRows()[0].getChildAt(it) as DefaultMutableTreeNode }
+            assertEquals(listOf("this checkout is 1 commit behind", "login.saffron › Sign in", "cart.saffron › Add to cart"), outcomes.map { it.toString() })
+            assertEquals("not imported: does not fit this checkout", detail(outcomes[2]))
+            // The rows stay: the status reload the import starts resets the tab's note, not them.
+            SaffronStatusService.getInstance(project).refresh()
+            PlatformTestUtil.waitWithEventsDispatching("the rows went with the reload", { runRows()[0].childCount == 3 && detail(runRows()[0]).contains("1 proposal pending here") }, 60)
+
+            // Proposals names the run each imported proposal came from.
+            val proposals = ProposalsTab(project, testRootDisposable)
+            @Suppress("UNCHECKED_CAST")
+            val list = UIUtil.findComponentOfType(proposals, CheckBoxList::class.java) as CheckBoxList<StatusProposal>
+            PlatformTestUtil.waitWithEventsDispatching("the proposals never loaded", { list.itemsCount == 1 }, 60)
+            assertTrue(list.model.getElementAt(0).text, list.model.getElementAt(0).text.endsWith("heal · verified · from run 41"))
+            val from = list.getItemAt(0)!!.importedFrom!!
+            assertEquals("imported from run azure:41 (https://dev.azure.com/acme/shop/_build/results?buildId=41) · on feature/login @ abc1234", from.description)
         } finally {
             made.forEach { it.toFile().deleteRecursively() }
         }

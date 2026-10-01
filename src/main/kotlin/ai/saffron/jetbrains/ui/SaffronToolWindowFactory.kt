@@ -18,9 +18,10 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 
 /**
- * The Saffron tool window (right side): Files, Last Run, Proposals, Tags, Health,
- * Orphans and Dashboard tabs. Files scans the project directly (works without the npm
- * package); the other tabs read `saffron status --json`.
+ * The Saffron tool window (right side): Files, Last Run, Proposals, CI Runs, Tags,
+ * Health, Orphans and Dashboard tabs. Files scans the project directly (works without
+ * the npm package); the other tabs read `saffron status --json`, and CI Runs reads
+ * `saffron runs --json`.
  */
 class SaffronToolWindowFactory : ToolWindowFactory, DumbAware {
 
@@ -34,6 +35,7 @@ class SaffronToolWindowFactory : ToolWindowFactory, DumbAware {
         manager.addContent(factory.createContent(SaffronPanel(project, parent), "Files", false))
         manager.addContent(factory.createContent(LastRunTab(project, parent), "Last Run", false))
         manager.addContent(factory.createContent(ProposalsTab(project, parent), "Proposals", false))
+        manager.addContent(factory.createContent(CiRunsTab(project, parent), "CI Runs", false))
         manager.addContent(factory.createContent(TagsTab(project, parent), "Tags", false))
         manager.addContent(factory.createContent(HealthTab(project, parent), "Health", false))
         manager.addContent(factory.createContent(OrphansTab(project, parent), "Orphans", false))
