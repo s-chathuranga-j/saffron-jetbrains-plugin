@@ -77,6 +77,8 @@ class ImportedFrom(
     val repository: String? = null,
     val branch: String? = null,
     val commit: String? = null,
+    /** The branch head when CI tested a merge commit (a pull request build). */
+    val headCommit: String? = null,
     val run: String? = null,
     val attempt: String? = null,
     val url: String? = null,
@@ -90,7 +92,7 @@ class ImportedFrom(
     val description: String
         get() = listOfNotNull(
             "imported from run ${run ?: "(no CI run recorded)"}" + (url?.takeIf { it.startsWith("https://") || it.startsWith("http://") }?.let { " ($it)" } ?: ""),
-            if (branch != null || commit != null) "on ${branch ?: "a detached HEAD"}" + (commit?.let { " @ ${it.take(7)}" } ?: "") else null,
+            if (branch != null || commit != null) "on ${branch ?: "a detached HEAD"}" + ((headCommit ?: commit)?.let { " @ ${it.take(7)}" } ?: "") else null,
             shard?.let { "shard ${it.index} of ${it.total}" },
         ).joinToString(" · ")
 }
