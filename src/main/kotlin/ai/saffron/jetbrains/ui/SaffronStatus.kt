@@ -316,7 +316,7 @@ class SaffronStatusService(private val project: Project) : Disposable {
                 val command: GeneralCommandLine = SaffronCommand.base(basePath).withParameters("status", "--json")
                 val output = ExecUtil.execAndGetOutput(command, 60_000)
                 if (output.exitCode != 0 || output.stdout.isBlank()) {
-                    StatusLoad(null, output.stderr.ifBlank { "saffron status exited with ${output.exitCode}" }.trim().lines().last())
+                    StatusLoad(null, output.stderr.takeIf { it.isNotBlank() }?.let(::runnerError) ?: "saffron status exited with ${output.exitCode}")
                 } else {
                     StatusLoad(Gson().fromJson(output.stdout, ProjectStatus::class.java), null)
                 }
@@ -325,6 +325,18 @@ class SaffronStatusService(private val project: Project) : Disposable {
             }
         }
     }
+}
+
+/**
+ * The line of a runner's stderr that says what went wrong: an `Error:` line
+ * or one of saffron's own, not Node's crash trailer (`Node.js v22`) or a
+ * stack frame.
+ */
+internal fun runnerError(stderr: String): String {
+    val lines = stderr.lines().map { it.trim() }.filter { it.isNotEmpty() }
+    return lines.firstOrNull { it.contains("Error:") || it.startsWith("saffron") }
+        ?: lines.firstOrNull { !it.startsWith("Node.js v") && !it.startsWith("at ") }
+        ?: lines.lastOrNull().orEmpty()
 }
 
 /** Whether a runner version ("0.9.1", "0.10.0-beta.1") is at least major.minor.patch. */

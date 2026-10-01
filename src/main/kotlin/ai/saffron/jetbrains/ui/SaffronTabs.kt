@@ -199,7 +199,7 @@ class ProposalsTab(project: Project, parent: Disposable) : StatusTab(project, pa
                 if (output.exitCode == 0 && output.stdout.isNotBlank()) {
                     "\n\nWHAT THIS PROPOSAL CHANGES\n\n" + output.stdout.trim()
                 } else {
-                    "\n\n(could not load the diff: " + output.stderr.trim().lines().lastOrNull().orEmpty() + ")"
+                    "\n\n(could not load the diff: " + runnerError(output.stderr) + ")"
                 }
             } catch (e: Exception) {
                 "\n\n(could not load the diff: " + (e.message ?: e.toString()) + ")"

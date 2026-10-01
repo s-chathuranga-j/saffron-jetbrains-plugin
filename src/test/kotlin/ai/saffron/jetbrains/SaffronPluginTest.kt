@@ -9,6 +9,10 @@ import ai.saffron.jetbrains.ui.StatusProposal
 import ai.saffron.jetbrains.ui.checkedCopy
 import ai.saffron.jetbrains.ui.currentEvidence
 import ai.saffron.jetbrains.ui.evidenceCopies
+import ai.saffron.jetbrains.ui.ago
+import ai.saffron.jetbrains.ui.runnerError
+import ai.saffron.jetbrains.ui.tooltipHtml
+import com.intellij.ide.util.PropertiesComponent
 import com.intellij.openapi.actionSystem.DefaultActionGroup
 import com.intellij.openapi.actionSystem.impl.ActionToolbarImpl
 import com.intellij.openapi.application.ApplicationManager
@@ -33,6 +37,7 @@ import org.jetbrains.plugins.textmate.api.TextMateBundleProvider
 import java.io.File
 import java.nio.file.Files
 import java.nio.file.Path
+import java.time.Instant
 import javax.swing.JComponent
 import javax.swing.tree.DefaultMutableTreeNode
 import javax.swing.tree.TreePath
@@ -273,7 +278,7 @@ class SaffronPluginTest : BasePlatformTestCase() {
             Files.writeString(
                 runs,
                 """{"provider":"azure","branch":"feature/login","runs":[""" +
-                    """{"id":"41","name":"e2e","number":"20261001.41","status":"completed","conclusion":"failure","branch":"feature/login","commit":"abc1234","url":"https://dev.azure.com/acme/shop/_build/results?buildId=41","pending":0},""" +
+                    """{"id":"41","name":"e2e","number":"20261001.41","title":"<html><img src=https://example.com/x.png>","status":"completed","conclusion":"failure","branch":"feature/login","commit":"abc1234","url":"https://dev.azure.com/acme/shop/_build/results?buildId=41","pending":0},""" +
                     """{"id":"40","name":"e2e","number":"20261001.40","status":"in_progress","pending":0}]}""",
             )
             val imported = dir.resolve("import.json")
@@ -284,12 +289,13 @@ class SaffronPluginTest : BasePlatformTestCase() {
                     """{"file":".saffron/proposals/cart-saffron/add.json","feature":"features/cart.saffron","scenario":"Add to cart","outcome":"refused","reason":"does not fit this checkout"}]}""",
             )
             val status = dir.resolve("status.json")
-            Files.writeString(
-                status,
-                """{"packageInstalled":true,"proposals":[{"file":".saffron/proposals/login-saffron/sign-in.json","feature":"features/login.saffron",""" +
+            fun proposal(name: String) =
+                """{"file":".saffron/proposals/login-saffron/$name.json","feature":"features/login.saffron",""" +
                     """"scenario":"Sign in","mode":"heal","verified":true,"revision":"${"a".repeat(64)}",""" +
-                    """"importedFrom":{"run":"azure:41","url":"https://dev.azure.com/acme/shop/_build/results?buildId=41","branch":"feature/login","commit":"abc1234def"}}]}""",
-            )
+                    """"importedFrom":{"run":"azure:41","url":"https://dev.azure.com/acme/shop/_build/results?buildId=41","branch":"feature/login","commit":"abc1234def"}}"""
+            fun proposals(vararg names: String) =
+                Files.writeString(status, """{"packageInstalled":true,"proposals":[${names.joinToString(",") { proposal(it) }}]}""")
+            proposals("sign-in")
             val log = dir.resolve("calls.log")
             val bin = base.resolve("node_modules/.bin/saffron")
             Files.createDirectories(bin.parent)
@@ -306,6 +312,10 @@ class SaffronPluginTest : BasePlatformTestCase() {
             PlatformTestUtil.waitWithEventsDispatching("the status never counted", { detail(runRows()[0]).contains("1 proposal pending here") }, 60)
             assertTrue(detail(runRows()[0]), detail(runRows()[0]).startsWith("failure"))
             assertTrue(detail(runRows()[1]), detail(runRows()[1]).startsWith("in progress"))
+            // The CI's title is text in the tooltip, never markup.
+            val tip = (runRows()[0].userObject as RunNode).tooltip!!
+            assertTrue(tip, tip.startsWith("<html>&lt;html&gt;&lt;img src=https://example.com/x.png&gt;<br>"))
+            assertFalse(tip, tip.contains("<img"))
 
             tree.selectionPath = TreePath(runRows()[0].path)
             val toolbar = UIUtil.findComponentOfType(tab.toolbar as JComponent, ActionToolbarImpl::class.java)!!
@@ -316,9 +326,26 @@ class SaffronPluginTest : BasePlatformTestCase() {
             val outcomes = (0 until 3).map { runRows()[0].getChildAt(it) as DefaultMutableTreeNode }
             assertEquals(listOf("this checkout is 1 commit behind", "login.saffron › Sign in", "cart.saffron › Add to cart"), outcomes.map { it.toString() })
             assertEquals("not imported: does not fit this checkout", detail(outcomes[2]))
-            // The rows stay: the status reload the import starts resets the tab's note, not them.
+            val note = UIUtil.findComponentsOfType(tab, JBLabel::class.java).single()
+            val summary = "1 proposal from e2e #20261001.41 ready for review in Proposals, 1 not imported, 1 warning."
+            PlatformTestUtil.waitWithEventsDispatching("no summary", { note.text == summary }, 30)
+            // A status reload keeps the rows, the selected run and the summary.
+            proposals("sign-in", "sign-up")
             SaffronStatusService.getInstance(project).refresh()
-            PlatformTestUtil.waitWithEventsDispatching("the rows went with the reload", { runRows()[0].childCount == 3 && detail(runRows()[0]).contains("1 proposal pending here") }, 60)
+            PlatformTestUtil.waitWithEventsDispatching("the rows went with the reload", { runRows()[0].childCount == 3 && detail(runRows()[0]).contains("2 proposals pending here") }, 60)
+            assertEquals(TreePath(runRows()[0].path), tree.selectionPath)
+            assertEquals(summary, note.text)
+            proposals("sign-in")
+
+            // The same run again: nothing new.
+            Files.writeString(imported, """{"proposals":[{"file":".saffron/proposals/login-saffron/sign-in.json","feature":"features/login.saffron","scenario":"Sign in","outcome":"unchanged"}]}""")
+            importRun.actionPerformed(TestActionEvent.createTestEvent(importRun))
+            PlatformTestUtil.waitWithEventsDispatching("no re-import summary", { note.text == "Already imported: nothing changed for e2e #20261001.41." }, 60)
+            // A refusal: the reason, under the run and in the note.
+            Files.writeString(imported, """{"error":"the bundle is from another repository"}""")
+            importRun.actionPerformed(TestActionEvent.createTestEvent(importRun))
+            PlatformTestUtil.waitWithEventsDispatching("no refusal", { note.text == "e2e #20261001.41 was not imported: the bundle is from another repository" }, 60)
+            assertEquals(listOf("the bundle is from another repository"), (0 until runRows()[0].childCount).map { runRows()[0].getChildAt(it).toString() })
 
             // Proposals names the run each imported proposal came from.
             val proposals = ProposalsTab(project, testRootDisposable)
@@ -331,6 +358,124 @@ class SaffronPluginTest : BasePlatformTestCase() {
         } finally {
             made.forEach { it.toFile().deleteRecursively() }
         }
+    }
+
+    /** A stand-in `saffron` in [dir]: `runs` runs [runs] (shell), anything else prints a bare status. */
+    private fun standIn(dir: Path, runs: String) {
+        val bin = dir.resolve("node_modules/.bin/saffron")
+        Files.createDirectories(bin.parent)
+        Files.writeString(bin, "#!/bin/sh\ncase \"\$1\" in\n  runs) $runs ;;\n  *) echo '{\"packageInstalled\":true}' ;;\nesac\n")
+        bin.toFile().setExecutable(true)
+    }
+
+    private fun runRows(tab: CiRunsTab): List<DefaultMutableTreeNode> {
+        val tree = UIUtil.findComponentOfType(tab, Tree::class.java)!!
+        return (0 until tree.model.getChildCount(tree.model.root)).map { tree.model.getChild(tree.model.root, it) as DefaultMutableTreeNode }
+    }
+
+    private fun press(tab: CiRunsTab, name: String) {
+        val toolbar = UIUtil.findComponentOfType(tab.toolbar as JComponent, ActionToolbarImpl::class.java)!!
+        val action = (toolbar.actionGroup as DefaultActionGroup).childActionsOrStubs.single { it.templateText == name }
+        action.actionPerformed(TestActionEvent.createTestEvent(action))
+    }
+
+    fun `test CI Runs says why there are no runs, signed out or a runner without saffron runs`() {
+        if (SystemInfo.isWindows) return
+        val base = Path.of(project.basePath!!)
+        try {
+            standIn(base, """echo '{"provider":"github","problem":{"kind":"signed-out","message":"Run gh auth login"}}'; exit 1""")
+            val tab = CiRunsTab(project, testRootDisposable)
+            fun row() = runRows(tab).singleOrNull()?.userObject as? RunNode
+            PlatformTestUtil.waitWithEventsDispatching("no problem row", { row()?.label == "Not signed in" }, 60)
+            assertEquals("Run gh auth login", row()!!.detail)
+
+            standIn(base, "echo \"error: unknown command 'runs'\" >&2; exit 1")
+            press(tab, "Refresh")
+            PlatformTestUtil.waitWithEventsDispatching("no update hint", { row()?.label == "CI runs unavailable" }, 60)
+            assertEquals("This saffron-ai has no saffron runs: update it (npm i -D saffron-ai@latest).", row()!!.detail)
+        } finally {
+            base.resolve("node_modules").toFile().deleteRecursively()
+        }
+    }
+
+    fun `test CI Runs lists the runs once the project is trusted`() {
+        if (SystemInfo.isWindows) return
+        val base = Path.of(project.basePath!!)
+        try {
+            standIn(base, """echo '{"provider":"github","runs":[{"id":"7","name":"e2e","number":"7","status":"completed","conclusion":"success"}]}'""")
+            var trust = false
+            val tab = CiRunsTab(project, testRootDisposable) { trust }
+            val tree = UIUtil.findComponentOfType(tab, Tree::class.java)!!
+            assertEquals(SaffronStatusService.UNTRUSTED, tree.emptyText.text)
+            press(tab, "Import Run")
+            assertEquals(SaffronStatusService.UNTRUSTED, UIUtil.findComponentsOfType(tab, JBLabel::class.java).single().text)
+            // Trusting the project reloads the status, and with it the runs.
+            trust = true
+            SaffronStatusService.getInstance(project).refresh()
+            PlatformTestUtil.waitWithEventsDispatching("the runs never loaded", { runRows(tab).map { it.toString() } == listOf("e2e #7") }, 60)
+        } finally {
+            base.resolve("node_modules").toFile().deleteRecursively()
+        }
+    }
+
+    fun `test CI Runs shows only the chosen project's runs and imports`() {
+        if (SystemInfo.isWindows) return
+        val base = Path.of(project.basePath!!)
+        val a = base.resolve("a")
+        val b = base.resolve("b")
+        val service = SaffronStatusService.getInstance(project)
+        try {
+            for (dir in listOf(a, b)) {
+                Files.createDirectories(dir)
+                Files.writeString(dir.resolve("saffron.config.json"), "{}")
+            }
+            fun runs(name: String) = """echo '{"provider":"github","runs":[{"id":"1","name":"$name","number":"1","status":"completed","conclusion":"failure"}]}'"""
+            standIn(a, runs("a") + """;; import) echo '{"proposals":[]}'""")
+            // b answers slowly: a later choice of a must not be overwritten by it.
+            standIn(b, "sleep 3; " + runs("b"))
+            service.choose(a)
+            val tab = CiRunsTab(project, testRootDisposable)
+            val tree = UIUtil.findComponentOfType(tab, Tree::class.java)!!
+            fun names() = runRows(tab).map { it.toString() }
+            PlatformTestUtil.waitWithEventsDispatching("a never listed", { names() == listOf("a #1") }, 60)
+            tree.selectionPath = TreePath(runRows(tab)[0].path)
+            press(tab, "Import Run")
+            PlatformTestUtil.waitWithEventsDispatching("a never imported", { runRows(tab).firstOrNull()?.childCount == 1 }, 60)
+
+            service.choose(b)
+            PlatformTestUtil.waitWithEventsDispatching("b never started loading", { names().isEmpty() }, 60)
+            service.choose(a)
+            PlatformTestUtil.waitWithEventsDispatching("a never listed again", { names() == listOf("a #1") }, 60)
+            // The import was a's earlier visit: gone with the switch.
+            assertEquals(0, runRows(tab)[0].childCount)
+            // b's late answer is dropped.
+            val until = System.currentTimeMillis() + 4_000
+            PlatformTestUtil.waitWithEventsDispatching("", { System.currentTimeMillis() > until }, 10)
+            assertEquals(listOf("a #1"), names())
+        } finally {
+            PropertiesComponent.getInstance(project).unsetValue("ai.saffron.jetbrains.root")
+            a.toFile().deleteRecursively()
+            b.toFile().deleteRecursively()
+            service.discoverRoots()
+        }
+    }
+
+    fun `test CI text in a tooltip is escaped, and runner errors and ages read plainly`() {
+        assertEquals("<html>&lt;html&gt;&lt;img src=x&gt;<br>a b</html>", tooltipHtml("<html><img src=x>", null, "a\u0007b"))
+        assertNull(tooltipHtml(null))
+
+        val crash = "/app/node_modules/saffron-ai/dist/cli.js:12\n    throw e;\n    ^\n\nError: Cannot find module 'x'\n    at Module._load (node:internal)\n\nNode.js v22.3.0"
+        assertEquals("Error: Cannot find module 'x'", runnerError(crash))
+        assertEquals("saffron: not a git repository", runnerError("saffron: not a git repository\nNode.js v22.3.0"))
+        assertEquals("something broke", runnerError("    at x (y.js:1)\nsomething broke\nNode.js v22.3.0"))
+
+        val now = Instant.parse("2026-10-01T12:00:00Z")
+        assertEquals("5 min ago", ago("2026-10-01T11:55:00Z", now))
+        assertEquals("3 h ago", ago("2026-10-01T09:00:00Z", now))
+        assertEquals("3 days ago", ago("2026-09-28T12:00:00Z", now))
+        assertNull(ago("2026-10-01T12:05:00Z", now))
+        assertNull(ago("yesterday", now))
+        assertNull(ago(null, now))
     }
 
     fun `test Open Replay names its run only to a runner that knows the option`() {
