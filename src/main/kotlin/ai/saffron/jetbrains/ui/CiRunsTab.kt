@@ -64,12 +64,14 @@ class RunImport(
  */
 internal fun <T> saffronJson(base: String, type: Class<T>, vararg args: String): Pair<T?, String?> {
     return try {
-        val output = ExecUtil.execAndGetOutput(SaffronCommand.base(base).withParameters(*args), 600_000)
+        // Longer than the runner's own 10 minutes for one gh or az call, so its message arrives first.
+        val output = ExecUtil.execAndGetOutput(SaffronCommand.base(base).withParameters(*args), 900_000)
         val parsed = output.stdout.takeIf { it.isNotBlank() }?.let { runCatching { Gson().fromJson(it, type) }.getOrNull() }
         if (parsed != null) return parsed to null
         val command = args.firstOrNull().orEmpty()
         val said = output.stderr.trim()
         null to when {
+            output.isTimeout -> "saffron $command was stopped after 15 minutes. Run it in a terminal to see where it waits."
             Regex("unknown command '?$command").containsMatchIn(said) -> "This saffron-ai has no saffron $command: update it (npm i -D saffron-ai@latest)."
             said.isNotEmpty() -> runnerError(said)
             else -> "saffron $command exited with ${output.exitCode}"

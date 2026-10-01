@@ -85,7 +85,9 @@ class SaffronPanel(private val project: Project, parent: Disposable) : SimpleToo
                 val root = FileUtil.toSystemIndependentName(service.root.toString()).trimEnd('/') + "/"
                 if (events.any { e ->
                         e.path.startsWith(root) &&
-                            (e.path.endsWith(".saffron") || e.path.endsWith(".feature") || e.path.contains("/.saffron/"))
+                            (e.path.endsWith(".saffron") || e.path.endsWith(".feature") || e.path.contains("/.saffron/")) &&
+                            // An import's download, there for a moment: the import's own writes reload.
+                            !e.path.contains("/.saffron/reports/run-download-")
                     }
                 ) scheduleRefresh()
             }
