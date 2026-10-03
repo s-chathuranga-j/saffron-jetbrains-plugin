@@ -25,6 +25,7 @@ import com.intellij.openapi.fileTypes.PlainTextFileType
 import com.intellij.openapi.fileTypes.UnknownFileType
 import com.intellij.openapi.util.Disposer
 import com.intellij.openapi.util.SystemInfo
+import com.intellij.openapi.vfs.VfsUtil
 import com.intellij.testFramework.PlatformTestUtil
 import com.intellij.testFramework.TestActionEvent
 import com.intellij.testFramework.fixtures.BasePlatformTestCase
@@ -463,8 +464,12 @@ class SaffronPluginTest : BasePlatformTestCase() {
             press(tab, "Import Run")
             PlatformTestUtil.waitWithEventsDispatching("a never imported", { runRows(tab).firstOrNull()?.childCount == 1 }, 60)
 
+            // a's rows go the moment b is chosen, not when b's status arrives: a selected a row
+            // cannot be imported into b meanwhile.
+            tree.selectionPath = TreePath(runRows(tab)[0].path)
             service.choose(b)
-            PlatformTestUtil.waitWithEventsDispatching("b never started loading", { names().isEmpty() }, 60)
+            assertEquals(emptyList<String>(), names())
+            press(tab, "Import Run")
             service.choose(a)
             PlatformTestUtil.waitWithEventsDispatching("a never listed again", { names() == listOf("a #1") }, 60)
             // The import was a's earlier visit: gone with the switch.
@@ -477,6 +482,34 @@ class SaffronPluginTest : BasePlatformTestCase() {
             PropertiesComponent.getInstance(project).unsetValue("ai.saffron.jetbrains.root")
             a.toFile().deleteRecursively()
             b.toFile().deleteRecursively()
+            service.discoverRoots()
+        }
+    }
+
+    fun `test CI Runs lists again when another branch is checked out`() {
+        if (SystemInfo.isWindows) return
+        val base = Path.of(project.basePath!!)
+        val c = base.resolve("c")
+        val service = SaffronStatusService.getInstance(project)
+        try {
+            Files.createDirectories(c)
+            Files.writeString(c.resolve("saffron.config.json"), "{}")
+            ProcessBuilder("git", "init", "-q", "-b", "main").directory(c.toFile()).start().waitFor()
+            val log = c.resolve("runs.log")
+            standIn(c, """echo x >> '$log'; echo '{"provider":"github","runs":[]}'""")
+            service.choose(c)
+            CiRunsTab(project, testRootDisposable)
+            PlatformTestUtil.waitWithEventsDispatching("never listed", { Files.exists(log) && Files.readAllLines(log).size == 1 }, 60)
+            // The tab finds and watches HEAD off the EDT.
+            val head = c.resolve(".git/HEAD")
+            val until = System.currentTimeMillis() + 2_000
+            PlatformTestUtil.waitWithEventsDispatching("", { System.currentTimeMillis() > until }, 10)
+            Files.writeString(head, "ref: refs/heads/feature/login\n")
+            VfsUtil.markDirtyAndRefresh(false, false, false, head.toFile())
+            PlatformTestUtil.waitWithEventsDispatching("the new branch's runs were never listed", { Files.readAllLines(log).size == 2 }, 60)
+        } finally {
+            PropertiesComponent.getInstance(project).unsetValue("ai.saffron.jetbrains.root")
+            c.toFile().deleteRecursively()
             service.discoverRoots()
         }
     }

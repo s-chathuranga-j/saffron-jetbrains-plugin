@@ -60,6 +60,8 @@ abstract class StatusTab(protected val project: Project, parent: Disposable) : S
     private var statusNote = ""
 
     private fun onStatus(load: StatusLoad) {
+        // Loaded for a project chosen before the one shown now: not this one's.
+        if (load.root != null && load.root != projectRoot) return
         val status = load.status
         statusNote = when {
             status == null && load.error == SaffronStatusService.UNTRUSTED -> load.error

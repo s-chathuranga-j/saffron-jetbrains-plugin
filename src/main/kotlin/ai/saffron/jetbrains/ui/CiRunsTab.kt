@@ -2,6 +2,7 @@ package ai.saffron.jetbrains.ui
 
 import ai.saffron.jetbrains.run.SaffronCommand
 import com.google.gson.Gson
+import com.intellij.execution.configurations.GeneralCommandLine
 import com.intellij.execution.process.CapturingProcessHandler
 import com.intellij.execution.process.ProcessOutput
 import com.intellij.icons.AllIcons
@@ -11,8 +12,14 @@ import com.intellij.openapi.application.ApplicationManager
 import com.intellij.openapi.progress.ProgressIndicator
 import com.intellij.openapi.progress.Task
 import com.intellij.openapi.project.Project
+import com.intellij.execution.util.ExecUtil
 import com.intellij.openapi.util.Disposer
+import com.intellij.openapi.util.io.FileUtil
 import com.intellij.openapi.util.text.StringUtil
+import com.intellij.openapi.vfs.LocalFileSystem
+import com.intellij.openapi.vfs.VirtualFileManager
+import com.intellij.openapi.vfs.newvfs.BulkFileListener
+import com.intellij.openapi.vfs.newvfs.events.VFileEvent
 import com.intellij.ui.ColoredTreeCellRenderer
 import com.intellij.ui.SimpleTextAttributes
 import com.intellij.ui.components.JBScrollPane
@@ -183,6 +190,13 @@ class CiRunsTab(
     private var ownNote: String? = null
     /** Set while [rebuild] replaces the rows: that selection change is not the user's. */
     private var rebuilding = false
+    /**
+     * The shown root's git HEAD file, where git says it is (a worktree's lives in the main
+     * repository): a checkout of another branch changes it, and the runs listed are the branch's.
+     */
+    @Volatile private var head: String? = null
+    private var headFor: Path? = null
+    private var headWatch: LocalFileSystem.WatchRequest? = null
 
     init {
         toolbar = toolbar(
@@ -206,7 +220,15 @@ class CiRunsTab(
         Disposer.register(parent) {
             disposed = true
             processes.forEach { it.destroyProcess() }
+            headWatch?.let { LocalFileSystem.getInstance().removeWatchedRoot(it) }
         }
+        // Another branch checked out: its runs, not the last branch's.
+        project.messageBus.connect(parent).subscribe(VirtualFileManager.VFS_CHANGES, object : BulkFileListener {
+            override fun after(events: List<VFileEvent>) {
+                val watched = head ?: return
+                if (events.any { it.path == watched }) ApplicationManager.getApplication().invokeLater({ loadRuns() }, project.disposed)
+            }
+        })
         // Its first render lists the runs.
         start()
     }
@@ -241,6 +263,7 @@ class CiRunsTab(
             return
         }
         val base = projectRoot
+        watchHead(base)
         if (shownFor != base) {
             // Another project, or trust granted: nothing of before stays, to be imported or read here.
             shownFor = base
@@ -282,6 +305,30 @@ class CiRunsTab(
                     ?: CiRuns(problem = CiProblem("failed", runs?.error ?: problem ?: "saffron runs gave no answer"))
                 listedFor = base
                 rebuild()
+            }, project.disposed)
+        }
+    }
+
+    /** Finds [base]'s HEAD file off the EDT and watches it; a root shown since makes its own. */
+    private fun watchHead(base: Path) {
+        if (headFor == base) return
+        headFor = base
+        head = null
+        ApplicationManager.getApplication().executeOnPooledThread {
+            val said = runCatching { ExecUtil.execAndGetOutput(GeneralCommandLine("git", "rev-parse", "--git-path", "HEAD").withWorkDirectory(base.toFile()), 10_000) }.getOrNull()
+            val file = said?.takeIf { it.exitCode == 0 }?.stdout?.trim()?.takeIf { it.isNotEmpty() }?.let { base.resolve(it).normalize() } ?: return@executeOnPooledThread
+            val fs = LocalFileSystem.getInstance()
+            val request = fs.addRootToWatch(file.parent.toString(), false)
+            // Loaded into the VFS, or no change to it is ever reported.
+            fs.refreshAndFindFileByNioFile(file)
+            ApplicationManager.getApplication().invokeLater({
+                if (headFor != base || disposed) {
+                    request?.let { fs.removeWatchedRoot(it) }
+                    return@invokeLater
+                }
+                headWatch?.let { fs.removeWatchedRoot(it) }
+                headWatch = request
+                head = FileUtil.toSystemIndependentName(file.toString())
             }, project.disposed)
         }
     }
@@ -391,7 +438,12 @@ class CiRunsTab(
             say("Select a run to import.")
             return
         }
-        val base = projectRoot
+        // The run is the listed project's: never imported into one chosen since.
+        val base = listedFor
+        if (base == null || base != projectRoot) {
+            say("Select a run to import.")
+            return
+        }
         val key = "$base|${run.id}"
         if (key in importing) return
         importing += key
@@ -406,7 +458,11 @@ class CiRunsTab(
             }
 
             override fun onCancel() {
-                if (base == projectRoot) say("The import was cancelled.")
+                // The runner writes as it goes: stopped part way, some of the run may be here already.
+                if (base == projectRoot) {
+                    say("The import was cancelled part way: what it had written by then (the run's report, screenshots, traces or proposals) stays in this checkout. Import the run again to finish it.")
+                    refreshStatus()
+                }
             }
 
             override fun onFinished() {

@@ -220,8 +220,8 @@ class ProjectStatus(
     val orphans: List<StatusOrphan>? = null,
 )
 
-/** Result of one load: the status, or why it is unavailable. */
-class StatusLoad(val status: ProjectStatus?, val error: String?)
+/** Result of one load: the status, or why it is unavailable, and the project root it is for. */
+class StatusLoad(val status: ProjectStatus?, val error: String?, val root: Path? = null)
 
 fun interface StatusListener {
     fun statusChanged(load: StatusLoad)
@@ -269,6 +269,10 @@ class SaffronStatusService(private val project: Project) : Disposable {
 
     fun choose(root: Path) {
         PropertiesComponent.getInstance(project).setValue(ROOT_KEY, root.toString())
+        // The tabs drop the last project's rows now, not when this one's status arrives: nothing
+        // shown, selected or imported belongs to a project no longer chosen.
+        latest = StatusLoad(null, null, this.root)
+        project.messageBus.syncPublisher(TOPIC).statusChanged(latest)
         refresh()
     }
 
@@ -288,7 +292,11 @@ class SaffronStatusService(private val project: Project) : Disposable {
         }
         try {
             discoverRoots()
-            val result = if (SaffronCommand.trusted(project)) runStatus(root.toString()) else StatusLoad(null, UNTRUSTED)
+            val shown = root
+            val loaded = if (SaffronCommand.trusted(project)) runStatus(shown.toString()) else StatusLoad(null, UNTRUSTED)
+            // Another project chosen meanwhile: this answer is not its status, and choose() asked for that one.
+            if (shown != root) return
+            val result = StatusLoad(loaded.status, loaded.error, shown)
             latest = result
             ApplicationManager.getApplication().invokeLater(
                 { project.messageBus.syncPublisher(TOPIC).statusChanged(result) },
