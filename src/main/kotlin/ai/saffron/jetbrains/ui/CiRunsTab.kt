@@ -49,8 +49,14 @@ class CiRun(
 
 class CiProblem(val kind: String = "failed", val message: String = "")
 
-/** `saffron runs --json`. */
-class CiRuns(val provider: String? = null, val branch: String? = null, val runs: List<CiRun> = emptyList(), val problem: CiProblem? = null)
+/** `saffron runs --json`; [error] is the runner's reply when it failed some other way. */
+class CiRuns(
+    val provider: String? = null,
+    val branch: String? = null,
+    val runs: List<CiRun> = emptyList(),
+    val problem: CiProblem? = null,
+    val error: String? = null,
+)
 
 class ImportedOutcome(val file: String = "", val feature: String = "", val scenario: String = "", val outcome: String = "", val reason: String? = null)
 
@@ -65,13 +71,15 @@ class RunImport(
 /**
  * `saffron <args>` in a project, its output read as JSON whatever the exit
  * code: the runner prints its JSON for a refusal or a problem too. Without
- * JSON, the reason: a runner that predates the command says so. [run]
- * starts the process and waits for it.
+ * JSON, the reason: a runner that predates the command says so, naming
+ * [version] (the project's saffron-ai) when known. [run] starts the process
+ * and waits for it.
  */
 internal fun <T> saffronJson(
     base: String,
     type: Class<T>,
     vararg args: String,
+    version: String? = null,
     run: (CapturingProcessHandler) -> ProcessOutput,
 ): Pair<T?, String?> {
     return try {
@@ -82,7 +90,9 @@ internal fun <T> saffronJson(
         val said = output.stderr.trim()
         null to when {
             output.isTimeout -> "saffron $command was stopped after 30 minutes. Run it in a terminal to see where it waits."
-            Regex("unknown command '?$command").containsMatchIn(said) -> "This saffron-ai has no saffron $command: update it (npm i -D saffron-ai@latest)."
+            Regex("unknown command '?$command").containsMatchIn(said) ->
+                "CI runs need saffron-ai 0.9.3 or later" + (version?.takeIf { it.isNotBlank() }?.let { "; this project has $it." } ?: ".") +
+                    " Update it: npm i -D saffron-ai@latest."
             said.isNotEmpty() -> runnerError(said)
             else -> "saffron $command exited with ${output.exitCode}"
         }
@@ -250,9 +260,10 @@ class CiRunsTab(
         loading.add(base)
         val load = ++loadCount
         loads[base] = load
+        val version = latest?.version
         ApplicationManager.getApplication().executeOnPooledThread {
             // The runner gives each gh or az call 10 minutes and may make several: 30 minutes stops only one that hangs.
-            val (runs, problem) = saffronJson(base.toString(), CiRuns::class.java, "runs", "--json", run = tracked { it.runProcess(30 * 60_000, true) })
+            val (runs, problem) = saffronJson(base.toString(), CiRuns::class.java, "runs", "--json", version = version, run = tracked { it.runProcess(30 * 60_000, true) })
             ApplicationManager.getApplication().invokeLater({
                 loading.remove(base)
                 // Not the latest list of this root, or listed for a project no longer shown: dropped.
@@ -266,7 +277,9 @@ class CiRunsTab(
                     loadRuns()
                     return@invokeLater
                 }
-                listed = runs ?: CiRuns(problem = CiProblem("failed", problem ?: "saffron runs gave no answer"))
+                // A runner's {error} is shown as the reason, never as "No CI runs".
+                listed = runs?.takeIf { it.error == null }
+                    ?: CiRuns(problem = CiProblem("failed", runs?.error ?: problem ?: "saffron runs gave no answer"))
                 listedFor = base
                 rebuild()
             }, project.disposed)
@@ -382,13 +395,14 @@ class CiRunsTab(
         val key = "$base|${run.id}"
         if (key in importing) return
         importing += key
+        val version = latest?.version
         say("Importing ${run.name} #${run.number}…")
         // No time limit: a slow download that would finish is not killed. Cancel in the progress bar stops it.
         object : Task.Backgroundable(project, "Importing ${run.name} #${run.number}", true) {
             private var answer: Pair<RunImport?, String?> = null to null
 
             override fun run(indicator: ProgressIndicator) {
-                answer = saffronJson(base.toString(), RunImport::class.java, "import", "--run", run.id, "--json", run = tracked { it.runProcessWithProgressIndicator(indicator) })
+                answer = saffronJson(base.toString(), RunImport::class.java, "import", "--run", run.id, "--json", version = version, run = tracked { it.runProcessWithProgressIndicator(indicator) })
             }
 
             override fun onCancel() {

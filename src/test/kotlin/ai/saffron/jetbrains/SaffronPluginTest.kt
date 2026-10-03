@@ -382,7 +382,7 @@ class SaffronPluginTest : BasePlatformTestCase() {
         action.actionPerformed(TestActionEvent.createTestEvent(action))
     }
 
-    fun `test CI Runs says why there are no runs, signed out or a runner without saffron runs`() {
+    fun `test CI Runs says why there are no runs, signed out, a runner error or a runner without saffron runs`() {
         if (SystemInfo.isWindows) return
         val base = Path.of(project.basePath!!)
         try {
@@ -392,10 +392,26 @@ class SaffronPluginTest : BasePlatformTestCase() {
             PlatformTestUtil.waitWithEventsDispatching("no problem row", { row()?.label == "Not signed in" }, 60)
             assertEquals("Run gh auth login", row()!!.detail)
 
+            // Any other failure is the runner's {error}: its reason, never "No CI runs".
+            standIn(base, """echo '{"error":"gh is not installed"}'; exit 2""")
+            press(tab, "Refresh")
+            PlatformTestUtil.waitWithEventsDispatching("no error row", { row()?.detail == "gh is not installed" }, 60)
+            assertEquals("CI runs unavailable", row()!!.label)
+
             standIn(base, "echo \"error: unknown command 'runs'\" >&2; exit 1")
             press(tab, "Refresh")
-            PlatformTestUtil.waitWithEventsDispatching("no update hint", { row()?.label == "CI runs unavailable" }, 60)
-            assertEquals("This saffron-ai has no saffron runs: update it (npm i -D saffron-ai@latest).", row()!!.detail)
+            val update = " Update it: npm i -D saffron-ai@latest."
+            PlatformTestUtil.waitWithEventsDispatching("no update hint", { row()?.detail == "CI runs need saffron-ai 0.9.3 or later.$update" }, 60)
+            assertEquals("CI runs unavailable", row()!!.label)
+
+            // With the status's version, the hint names it.
+            standInCases(base, "  runs) echo \"error: unknown command 'runs'\" >&2; exit 1 ;;\n  status) echo '{\"version\":\"0.9.2\",\"packageInstalled\":true}' ;;")
+            val service = SaffronStatusService.getInstance(project)
+            service.refresh()
+            PlatformTestUtil.waitWithEventsDispatching("the status never reloaded", { service.latest.status?.version == "0.9.2" }, 60)
+            PlatformTestUtil.dispatchAllEventsInIdeEventQueue()
+            press(tab, "Refresh")
+            PlatformTestUtil.waitWithEventsDispatching("no version in the hint", { row()?.detail == "CI runs need saffron-ai 0.9.3 or later; this project has 0.9.2.$update" }, 60)
         } finally {
             base.resolve("node_modules").toFile().deleteRecursively()
         }
@@ -584,6 +600,27 @@ class SaffronPluginTest : BasePlatformTestCase() {
         assertNull(ago("2026-10-01T12:05:00Z", now))
         assertNull(ago("yesterday", now))
         assertNull(ago(null, now))
+    }
+
+    fun `test the Dashboard opens a web page only for a click in its main frame`() {
+        val reports = "file:///work/shop/.saffron/"
+        fun nav(url: String, click: Boolean) = ai.saffron.jetbrains.ui.reportNavigation(url, reports, click)
+        val load = ai.saffron.jetbrains.ui.ReportNavigation.LOAD
+        val external = ai.saffron.jetbrains.ui.ReportNavigation.EXTERNAL
+        val cancel = ai.saffron.jetbrains.ui.ReportNavigation.CANCEL
+        assertEquals(external, nav("https://saffron-ai.io/docs", true))
+        assertEquals(external, nav("HTTP://example.com", true))
+        // A script, a redirect or an iframe: nothing opens.
+        assertEquals(cancel, nav("https://example.com/x", false))
+        assertEquals(cancel, nav("http://example.com/x", false))
+        // The report's own files and anchors, and loadHTML's page, load here whoever asked.
+        assertEquals(load, nav("${reports}reports/latest.html#s1", false))
+        assertEquals(load, nav("file:///jbcefbrowser/123", false))
+        assertEquals(load, nav("about:blank", false))
+        assertEquals(load, nav("data:image/png;base64,AA", true))
+        // Anything else is cancelled, a click or not.
+        assertEquals(cancel, nav("file:///etc/passwd", true))
+        assertEquals(cancel, nav("javascript:alert(1)", true))
     }
 
     fun `test Open Replay names its run only to a runner that knows the option`() {

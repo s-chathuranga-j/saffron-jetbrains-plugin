@@ -1,7 +1,12 @@
 <h3>0.4.0</h3>
 <ul>
-  <li><b>CI Runs tab.</b> The current branch's CI runs, GitHub Actions or Azure Pipelines, through <code>saffron runs</code>. <b>Import</b> runs <code>saffron import --run</code> and lists under the run what happened to each proposal and any warning. The Proposals tab names the CI run an imported proposal came from. From a red CI run to an accepted repair without leaving the IDE; the CI's own tool keeps the credentials. Needs the <code>saffron-ai</code> release after 0.9.2, with <code>gh</code> or <code>az</code> signed in.</li>
+  <li><b>CI Runs tab.</b> The current branch's CI runs, GitHub Actions or Azure Pipelines, through <code>saffron runs</code>. <b>Import</b> runs <code>saffron import --run</code> and lists under the run what happened to each proposal and any warning. The Proposals tab names the CI run an imported proposal came from. From a red CI run to an accepted repair without leaving the IDE; the CI's own tool keeps the credentials. Needs <code>saffron-ai</code> 0.9.3 or later, with <code>gh</code> or <code>az</code> signed in; with an older runner the tab says which version the project has.</li>
   <li><b>Text from CI is shown as plain text</b>, in CI Runs and in Last Run after an import, never as markup. Import is a background task you can cancel; a run is imported once even if you switch projects meanwhile; Refresh never starts a second list. The tab loads as soon as the project is trusted, and its processes stop when the project closes.</li>
+  <li><b>A runner error is shown, not "No CI runs".</b> When <code>saffron runs</code> fails with an error, CI Runs shows the runner's reason under "CI runs unavailable".</li>
+  <li><b>A tool window button never changes a saved configuration.</b> Run Selected on one file used the name of a right-click configuration, <code>Run login.saffron</code>, and reset a saved one of that name, tags and extra arguments included. The buttons now reuse only temporary configurations, and use <code>Saffron: Run login.saffron</code> when a saved one has the name.</li>
+  <li><b>The Dashboard opens a web page only when you click a link.</b> A navigation started by the report itself, or inside a frame of it, is cancelled instead of opening your browser.</li>
+  <li>Project trust is checked without the API deprecated in 2025.1, and still works on 2024.2.</li>
+  <li>The README names the real fallback command, <code>npx -y -p saffron-ai saffron lsp</code>, and lists the <code>reject</code>, <code>prune</code> and <code>login</code> run configuration commands.</li>
 </ul>
 <h3>0.3.1</h3>
 <ul>

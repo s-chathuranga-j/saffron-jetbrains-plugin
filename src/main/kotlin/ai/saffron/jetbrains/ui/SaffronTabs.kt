@@ -375,30 +375,44 @@ class DashboardTab(project: Project, parent: Disposable) : StatusTab(project, pa
     }
 
     /**
-     * The panel shows the report and nothing else: web links open in the
-     * system browser, popups too, and any other navigation is cancelled. A
-     * screenshot link (a data: or file: popup) opens here instead.
+     * The panel shows the report and nothing else: web links the user clicks
+     * open in the system browser, popups too, and any other navigation is
+     * cancelled. A screenshot link (a data: or file: popup) opens here instead.
      */
     private fun keepToReport(b: JBCefBrowser) {
-        fun allowed(url: String): Boolean {
-            if (url.startsWith("http://", true) || url.startsWith("https://", true)) {
-                BrowserUtil.browse(url)
-                return false
-            }
-            val reports = projectRoot.resolve(".saffron").toUri().toString()
-            // loadHTML's own page, and the report's files and anchors.
-            return url.startsWith(reports) || url.startsWith("file:///jbcefbrowser/") || url.startsWith("about:") || url.startsWith("data:")
-        }
+        fun reports() = projectRoot.resolve(".saffron").toUri().toString()
         b.jbCefClient.addRequestHandler(object : CefRequestHandlerAdapter() {
-            override fun onBeforeBrowse(browser: CefBrowser?, frame: CefFrame?, request: CefRequest, userGesture: Boolean, isRedirect: Boolean): Boolean =
-                !allowed(request.url)
+            override fun onBeforeBrowse(browser: CefBrowser?, frame: CefFrame?, request: CefRequest, userGesture: Boolean, isRedirect: Boolean): Boolean {
+                val url = request.url
+                return when (reportNavigation(url, reports(), userGesture && frame?.isMain == true)) {
+                    ReportNavigation.LOAD -> false
+                    ReportNavigation.EXTERNAL -> true.also { BrowserUtil.browse(url) }
+                    ReportNavigation.CANCEL -> true
+                }
+            }
         }, b.cefBrowser)
         b.jbCefClient.addLifeSpanHandler(object : CefLifeSpanHandlerAdapter() {
             override fun onBeforePopup(browser: CefBrowser?, frame: CefFrame?, targetUrl: String?, targetFrameName: String?): Boolean {
                 val url = targetUrl ?: return true
-                if (url.startsWith("data:", true) || url.startsWith("file:", true)) browser?.loadURL(url) else allowed(url)
+                if (url.startsWith("data:", true) || url.startsWith("file:", true)) browser?.loadURL(url)
+                else if (reportNavigation(url, reports(), true) == ReportNavigation.EXTERNAL) BrowserUtil.browse(url)
                 return true
             }
         }, b.cefBrowser)
     }
+}
+
+internal enum class ReportNavigation { LOAD, EXTERNAL, CANCEL }
+
+/**
+ * What the Dashboard does with a navigation to [url]. A web page opens in the
+ * system browser only for [userClick] (a user gesture in the main frame): a
+ * report's script or iframe cannot open one unasked. [reports] is the
+ * project's .saffron folder as a URI.
+ */
+internal fun reportNavigation(url: String, reports: String, userClick: Boolean): ReportNavigation = when {
+    url.startsWith("http://", true) || url.startsWith("https://", true) -> if (userClick) ReportNavigation.EXTERNAL else ReportNavigation.CANCEL
+    // loadHTML's own page, and the report's files and anchors.
+    url.startsWith(reports) || url.startsWith("file:///jbcefbrowser/") || url.startsWith("about:") || url.startsWith("data:") -> ReportNavigation.LOAD
+    else -> ReportNavigation.CANCEL
 }

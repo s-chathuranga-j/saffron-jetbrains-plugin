@@ -1,7 +1,6 @@
 package ai.saffron.jetbrains.run
 
 import com.intellij.execution.configurations.GeneralCommandLine
-import com.intellij.ide.impl.isTrusted
 import com.intellij.openapi.project.Project
 import com.intellij.openapi.util.SystemInfo
 import com.intellij.util.execution.ParametersListUtil
@@ -18,7 +17,21 @@ object SaffronCommand {
     val COMMANDS: List<String> = listOf("run", "report", "trace", "accept", "reject", "prune", "login")
 
     /** Nothing is spawned for a project the user has not trusted: its node_modules and config are its own code. */
-    fun trusted(project: Project): Boolean = project.isTrusted()
+    fun trusted(project: Project): Boolean = isTrusted?.invoke(null, project) as? Boolean ?: false
+
+    /**
+     * The platform's trust check, looked up once: TrustedProjects.isProjectTrusted(Project)
+     * where it exists (251 and later), else the `isTrusted()` extension that 251
+     * deprecated (242 to 243). Reflective both ways so no build carries a call
+     * to the deprecated one; neither found means untrusted.
+     */
+    private val isTrusted: java.lang.reflect.Method? = listOf(
+        "com.intellij.ide.trustedProjects.TrustedProjects" to "isProjectTrusted",
+        "com.intellij.ide.impl.TrustedProjects" to "isTrusted",
+    ).firstNotNullOfOrNull { (owner, method) ->
+        runCatching { Class.forName(owner).getMethod(method, Project::class.java) }.getOrNull()
+            ?.takeIf { java.lang.reflect.Modifier.isStatic(it.modifiers) }
+    }
 
     fun localBinary(basePath: String?): Path? {
         val p = basePath?.let { Path.of(it, "node_modules", ".bin", if (SystemInfo.isWindows) "saffron.cmd" else "saffron") }

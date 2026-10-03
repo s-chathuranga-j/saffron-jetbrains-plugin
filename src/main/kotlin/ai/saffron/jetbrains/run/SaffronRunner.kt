@@ -17,13 +17,21 @@ object SaffronRunner {
     /**
      * The named configuration, reset and then configured. It is reused by
      * name, so without the reset a switch set by an earlier button (rerecord,
-     * extra arguments) would carry into this one unseen.
+     * extra arguments) would carry into this one unseen. Only a temporary one
+     * is reused: a saved configuration of that name is the user's and is
+     * never reset, so the button gets its own under "Saffron: <name>".
      */
     fun prepare(project: Project, name: String, configure: (SaffronRunConfiguration) -> Unit): RunnerAndConfigurationSettings {
         val runManager = RunManager.getInstance(project)
         val type = SaffronConfigurationType.INSTANCE
-        val settings = runManager.findConfigurationByTypeAndName(type, name)
-            ?: runManager.createConfiguration(name, type.factory).also {
+        var label = name
+        var found = runManager.findConfigurationByTypeAndName(type, label)
+        while (found != null && !found.isTemporary) {
+            label = "Saffron: $label"
+            found = runManager.findConfigurationByTypeAndName(type, label)
+        }
+        val settings = found
+            ?: runManager.createConfiguration(label, type.factory).also {
                 it.isTemporary = true
                 runManager.addConfiguration(it)
             }

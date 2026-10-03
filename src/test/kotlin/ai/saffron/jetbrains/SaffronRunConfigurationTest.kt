@@ -466,6 +466,35 @@ class SaffronRunConfigurationTest : BasePlatformTestCase() {
         }
     }
 
+    fun `test a tool window button never resets a saved configuration of the same name`() {
+        val name = "Run login.saffron"
+        val runManager = RunManager.getInstance(project)
+        val type = SaffronConfigurationType.INSTANCE
+        // What right-click, Run and then Save Configuration leave behind.
+        val saved = runManager.createConfiguration(name, type.factory)
+        runManager.addConfiguration(saved)
+        assertFalse(saved.isTemporary)
+        val mine = saved.configuration as SaffronRunConfiguration
+        mine.paths = "features/login.saffron"
+        mine.tags = "@smoke"
+        mine.extraArgs = "--workers 2"
+        try {
+            // Run Selected with login.saffron ticked.
+            val used = SaffronRunner.prepare(project, name) { it.paths = "features/login.saffron"; it.headed = true }
+            assertNotSame(saved, used)
+            assertTrue(used.isTemporary)
+            assertEquals("Saffron: $name", used.name)
+            assertSame(saved, runManager.findConfigurationByTypeAndName(type, name))
+            assertEquals("@smoke", mine.tags)
+            assertEquals("--workers 2", mine.extraArgs)
+            assertFalse(mine.headed)
+            // Pressed again: the same temporary one is reused.
+            assertSame(used, SaffronRunner.prepare(project, name) { it.paths = "features/login.saffron" })
+        } finally {
+            listOf(name, "Saffron: $name").forEach { n -> runManager.findConfigurationByTypeAndName(type, n)?.let(runManager::removeConfiguration) }
+        }
+    }
+
     fun `test login passes the provider typed in the field`() {
         val c = newConfiguration()
         c.command = "login"
