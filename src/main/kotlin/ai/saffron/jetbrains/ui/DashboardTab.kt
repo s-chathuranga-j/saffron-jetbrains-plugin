@@ -37,10 +37,11 @@ class DashboardTab(project: Project, parent: Disposable) : StatusTab(project, pa
     }
     private val openQuery: JBCefJSQuery? = browser?.let { JBCefJSQuery.create(it as JBCefBrowserBase) }
     private val placeholder = JBLabel("This IDE build has no embedded browser. Run `saffron dashboard` to open the dashboard in a browser.", JBLabel.CENTER)
-    private var features: List<StatusFeature> = emptyList()
     private var latest: ProjectStatus? = null
-    /** Bumped per load: a page rendered for an earlier status is dropped. */
+    /** Bumped per status, shown or not: a page rendered for an earlier status (or project) is dropped. */
     private var generation = 0
+    /** The project and scenarios the page on screen was rendered for: a click opens there. */
+    private var shownFor: Pair<java.nio.file.Path, List<StatusFeature>>? = null
     /** A status arrived while the tab was hidden: rendering waits until it is shown. */
     private var stale = true
     /** The page as last loaded: an unchanged one is not reloaded (and scrolled to the top). */
@@ -54,7 +55,9 @@ class DashboardTab(project: Project, parent: Disposable) : StatusTab(project, pa
                 Disposer.register(b, q)
                 q.addHandler { payload ->
                     val (feature, scenario) = payload.split('\n', limit = 2).let { it[0] to it.getOrElse(1) { "" } }
-                    ApplicationManager.getApplication().invokeLater({ openScenario(features, feature, scenario) }, project.disposed)
+                    ApplicationManager.getApplication().invokeLater({
+                        shownFor?.let { (root, features) -> openScenario(features, feature, scenario, root) }
+                    }, project.disposed)
                     null
                 }
             }
@@ -77,36 +80,40 @@ class DashboardTab(project: Project, parent: Disposable) : StatusTab(project, pa
 
     override fun render(status: ProjectStatus?) {
         latest = status
-        features = status?.features ?: emptyList()
+        // Before anything else: a load still running for the last status must not land after this one.
+        val loadFor = ++generation
         val b = browser ?: return
         if (!isShowing) {
             stale = true
             return
         }
         stale = false
-        val loadFor = ++generation
+        val root = projectRoot
+        val features = status?.features ?: emptyList()
         when {
-            status == null -> show(b, message("Loading…"))
+            status == null -> show(b, message("Loading…"), null)
             !runnerAtLeast(status.version, 0, 9, 4) ->
-                show(b, message("The dashboard needs saffron-ai 0.9.4 or later; this project has ${status.version}. Run npm i -D saffron-ai@latest."))
+                show(b, message("The dashboard needs saffron-ai 0.9.4 or later; this project has ${status.version}. Run npm i -D saffron-ai@latest."), null)
             else -> {
-                val base = projectRoot.toString()
+                val base = root.toString()
                 val js = openQuery?.inject("f + '\\n' + s") ?: ""
                 ApplicationManager.getApplication().executeOnPooledThread {
+                    var rendered = false
                     val page = try {
                         val out = ExecUtil.execAndGetOutput(SaffronCommand.base(base).withParameters("dashboard", "--stdout"), 60_000)
-                        if (out.exitCode == 0 && out.stdout.isNotBlank()) withOpener(out.stdout, js)
+                        if (out.exitCode == 0 && out.stdout.isNotBlank()) withOpener(out.stdout, js).also { rendered = true }
                         else message("Could not load the dashboard: ${runnerError(out.stderr)}")
                     } catch (e: Exception) {
                         message("Could not load the dashboard: ${e.message ?: e}")
                     }
-                    ApplicationManager.getApplication().invokeLater({ if (loadFor == generation) show(b, page) }, project.disposed)
+                    ApplicationManager.getApplication().invokeLater({ if (loadFor == generation) show(b, page, if (rendered) root to features else null) }, project.disposed)
                 }
             }
         }
     }
 
-    private fun show(b: JBCefBrowser, html: String) {
+    private fun show(b: JBCefBrowser, html: String, scenariosFrom: Pair<java.nio.file.Path, List<StatusFeature>>?) {
+        shownFor = scenariosFrom
         if (html == shown) return
         shown = html
         b.loadHTML(html)

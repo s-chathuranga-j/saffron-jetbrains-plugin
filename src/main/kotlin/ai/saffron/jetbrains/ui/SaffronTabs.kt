@@ -89,9 +89,12 @@ abstract class StatusTab(protected val project: Project, parent: Disposable) : S
     /** The Saffron project the tabs show. */
     protected val projectRoot: Path get() = SaffronStatusService.getInstance(project).root
 
-    /** Opens [scenario] (its name in the feature file) at its line, or the file's top when it is not found. */
-    protected fun openScenario(features: List<StatusFeature>, feature: String, scenario: String): Boolean {
-        val vf = LocalFileSystem.getInstance().refreshAndFindFileByNioFile(projectRoot.resolve(feature)) ?: return false
+    /**
+     * Opens [scenario] (its name in the feature file) at its line, or the file's top when it is not found.
+     * [root] is the Saffron project the row was listed for, which may no longer be the one shown.
+     */
+    protected fun openScenario(features: List<StatusFeature>, feature: String, scenario: String, root: Path = projectRoot): Boolean {
+        val vf = LocalFileSystem.getInstance().refreshAndFindFileByNioFile(root.resolve(feature)) ?: return false
         val line = features.firstOrNull { it.path == feature }?.scenarios?.firstOrNull { it.name == scenario }?.line
         OpenFileDescriptor(project, vf, ((line ?: 1) - 1).coerceAtLeast(0), 0).navigate(true)
         return true
