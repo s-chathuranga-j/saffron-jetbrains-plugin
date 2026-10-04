@@ -3,7 +3,6 @@ package ai.saffron.jetbrains.ui
 import ai.saffron.jetbrains.run.SaffronCommand
 import ai.saffron.jetbrains.run.SaffronRunner
 import com.intellij.icons.AllIcons
-import com.intellij.ide.BrowserUtil
 import com.intellij.execution.util.ExecUtil
 import com.intellij.openapi.Disposable
 import com.intellij.openapi.actionSystem.ActionManager
@@ -13,6 +12,8 @@ import com.intellij.openapi.actionSystem.AnActionEvent
 import com.intellij.openapi.actionSystem.DefaultActionGroup
 import com.intellij.openapi.project.DumbAwareAction
 import com.intellij.openapi.project.Project
+import com.intellij.openapi.fileEditor.OpenFileDescriptor
+import com.intellij.openapi.vfs.LocalFileSystem
 import com.intellij.openapi.ui.SimpleToolWindowPanel
 import com.intellij.ui.CheckBoxList
 import com.intellij.ui.ColoredListCellRenderer
@@ -22,17 +23,9 @@ import com.intellij.ui.components.JBCheckBox
 import com.intellij.ui.components.JBLabel
 import com.intellij.ui.components.JBScrollPane
 import com.intellij.ui.components.JBTextArea
-import com.intellij.ui.jcef.JBCefApp
-import com.intellij.ui.jcef.JBCefBrowser
 import com.intellij.util.ui.JBUI
 import com.intellij.util.ui.UIUtil
-import org.cef.browser.CefBrowser
-import org.cef.browser.CefFrame
-import org.cef.handler.CefLifeSpanHandlerAdapter
-import org.cef.handler.CefRequestHandlerAdapter
-import org.cef.network.CefRequest
 import java.awt.BorderLayout
-import java.nio.file.Files
 import java.nio.file.Path
 import javax.swing.BoxLayout
 import javax.swing.Icon
@@ -95,6 +88,14 @@ abstract class StatusTab(protected val project: Project, parent: Disposable) : S
 
     /** The Saffron project the tabs show. */
     protected val projectRoot: Path get() = SaffronStatusService.getInstance(project).root
+
+    /** Opens [scenario] (its name in the feature file) at its line, or the file's top when it is not found. */
+    protected fun openScenario(features: List<StatusFeature>, feature: String, scenario: String): Boolean {
+        val vf = LocalFileSystem.getInstance().refreshAndFindFileByNioFile(projectRoot.resolve(feature)) ?: return false
+        val line = features.firstOrNull { it.path == feature }?.scenarios?.firstOrNull { it.name == scenario }?.line
+        OpenFileDescriptor(project, vf, ((line ?: 1) - 1).coerceAtLeast(0), 0).navigate(true)
+        return true
+    }
 }
 
 /** Pending proposals: tick, read the narrative, accept or reject. */
@@ -323,98 +324,4 @@ class TagsTab(project: Project, parent: Disposable) : StatusTab(project, parent)
             it.headed = headed.isSelected
         }
     }
-}
-
-/** The HTML report, embedded. */
-class DashboardTab(project: Project, parent: Disposable) : StatusTab(project, parent) {
-
-    // An IDE whose JCEF classes this plugin cannot load (not installed, or
-    // not visible to it) gets the placeholder and Open in Browser, not a crash.
-    private val browser: JBCefBrowser? = try {
-        if (JBCefApp.isSupported()) JBCefBrowser() else null
-    } catch (e: LinkageError) {
-        null
-    }
-    private val placeholder = JBLabel("", JBLabel.CENTER)
-    private var reportPath: Path? = null
-    /** The report and its modification time as last loaded: an unchanged one is not reloaded on every status refresh. */
-    private var loaded: Pair<Path, java.nio.file.attribute.FileTime>? = null
-
-    init {
-        toolbar = toolbar(
-            action("Reload", "Reload the report", AllIcons.Actions.Refresh) { refreshStatus() },
-            action("Open in Browser", "Open the report in the system browser", AllIcons.Nodes.PpWeb) { reportPath?.let { BrowserUtil.browse(it.toUri()) } },
-        )
-        browser?.let {
-            com.intellij.openapi.util.Disposer.register(parent, it)
-            keepToReport(it)
-        }
-        setContent(JPanel(BorderLayout()).apply {
-            add(note, BorderLayout.NORTH)
-            add(browser?.component ?: placeholder, BorderLayout.CENTER)
-        })
-        start()
-    }
-
-    override fun render(status: ProjectStatus?) {
-        val rel = status?.lastRun?.reportHtml
-        val path = rel?.let { projectRoot.resolve(it) }
-        reportPath = path?.takeIf { Files.exists(it) }
-        val b = browser
-        if (b == null) {
-            placeholder.text = if (reportPath != null) "This IDE build has no embedded browser. Use Open in Browser." else "No report yet: run something first."
-            return
-        }
-        val target = reportPath
-        val stamp = target?.let { runCatching { Files.getLastModifiedTime(it) }.getOrNull() }?.let { target to it }
-        if (stamp != null && stamp == loaded) return
-        loaded = stamp
-        if (target == null) {
-            b.loadHTML("<html><body style=\"font-family:sans-serif;color:#888;padding:24px\">No report yet. Run a feature file and the report appears here.</body></html>")
-        } else {
-            b.loadURL(target.toUri().toString())
-        }
-    }
-
-    /**
-     * The panel shows the report and nothing else: web links the user clicks
-     * open in the system browser, popups too, and any other navigation is
-     * cancelled. A screenshot link (a data: or file: popup) opens here instead.
-     */
-    private fun keepToReport(b: JBCefBrowser) {
-        fun reports() = projectRoot.resolve(".saffron").toUri().toString()
-        b.jbCefClient.addRequestHandler(object : CefRequestHandlerAdapter() {
-            override fun onBeforeBrowse(browser: CefBrowser?, frame: CefFrame?, request: CefRequest, userGesture: Boolean, isRedirect: Boolean): Boolean {
-                val url = request.url
-                return when (reportNavigation(url, reports(), userGesture && frame?.isMain == true)) {
-                    ReportNavigation.LOAD -> false
-                    ReportNavigation.EXTERNAL -> true.also { BrowserUtil.browse(url) }
-                    ReportNavigation.CANCEL -> true
-                }
-            }
-        }, b.cefBrowser)
-        b.jbCefClient.addLifeSpanHandler(object : CefLifeSpanHandlerAdapter() {
-            override fun onBeforePopup(browser: CefBrowser?, frame: CefFrame?, targetUrl: String?, targetFrameName: String?): Boolean {
-                val url = targetUrl ?: return true
-                if (url.startsWith("data:", true) || url.startsWith("file:", true)) browser?.loadURL(url)
-                else if (reportNavigation(url, reports(), true) == ReportNavigation.EXTERNAL) BrowserUtil.browse(url)
-                return true
-            }
-        }, b.cefBrowser)
-    }
-}
-
-internal enum class ReportNavigation { LOAD, EXTERNAL, CANCEL }
-
-/**
- * What the Dashboard does with a navigation to [url]. A web page opens in the
- * system browser only for [userClick] (a user gesture in the main frame): a
- * report's script or iframe cannot open one unasked. [reports] is the
- * project's .saffron folder as a URI.
- */
-internal fun reportNavigation(url: String, reports: String, userClick: Boolean): ReportNavigation = when {
-    url.startsWith("http://", true) || url.startsWith("https://", true) -> if (userClick) ReportNavigation.EXTERNAL else ReportNavigation.CANCEL
-    // loadHTML's own page, and the report's files and anchors.
-    url.startsWith(reports) || url.startsWith("file:///jbcefbrowser/") || url.startsWith("about:") || url.startsWith("data:") -> ReportNavigation.LOAD
-    else -> ReportNavigation.CANCEL
 }

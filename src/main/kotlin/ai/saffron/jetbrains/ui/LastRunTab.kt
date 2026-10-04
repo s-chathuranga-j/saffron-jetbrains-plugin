@@ -2,10 +2,10 @@ package ai.saffron.jetbrains.ui
 
 import ai.saffron.jetbrains.run.SaffronRunner
 import com.intellij.icons.AllIcons
+import com.intellij.ide.BrowserUtil
 import com.intellij.openapi.Disposable
 import com.intellij.openapi.application.ApplicationManager
 import com.intellij.openapi.fileEditor.FileEditorManager
-import com.intellij.openapi.fileEditor.OpenFileDescriptor
 import com.intellij.openapi.project.Project
 import com.intellij.openapi.vfs.LocalFileSystem
 import com.intellij.openapi.vfs.VfsUtil
@@ -86,6 +86,8 @@ class LastRunTab(project: Project, parent: Disposable) : StatusTab(project, pare
     private var features: List<StatusFeature> = emptyList()
     /** When the listed run started: Open Replay names it, so a later run is not opened in its place. */
     private var shownRun: String? = null
+    /** The listed run's HTML report, project-relative. */
+    private var reportHtml: String? = null
     private val tree = Tree(model).apply {
         isRootVisible = false
         showsRootHandles = true
@@ -103,8 +105,9 @@ class LastRunTab(project: Project, parent: Disposable) : StatusTab(project, pare
     init {
         toolbar = toolbar(
             action("Open Screenshot", "The page at the moment the selected scenario went wrong", AllIcons.FileTypes.Image) { openScreenshot() },
-            action("Open Replay", "Step through the selected scenario's run: the page at every action, the network alongside (saffron trace)", AllIcons.Actions.Execute) { openReplay() },
+            action("Open Replay", "Step through the selected scenario's run, or every traced scenario when none is selected: the page at every action, the network alongside (saffron trace)", AllIcons.Actions.Execute) { openReplay() },
             action("Open Scenario", "Jump to the selected scenario in its feature file", AllIcons.Actions.EditSource) { openScenario() },
+            action("Open Report", "The last run's HTML report in the browser: every scenario and step", AllIcons.Nodes.PpWeb) { openReport() },
             action("Refresh", "Reload the status", AllIcons.Actions.Refresh) { refreshStatus() },
         )
         tree.emptyText.text = "Loading…"
@@ -129,6 +132,7 @@ class LastRunTab(project: Project, parent: Disposable) : StatusTab(project, pare
         root.removeAllChildren()
         features = status?.features ?: emptyList()
         val run = status?.lastRun
+        reportHtml = run?.reportHtml
         // Runners before 0.9.1 have no --run and would refuse the command itself.
         shownRun = run?.startedAt?.takeIf { it.isNotBlank() && runnerAtLeast(status?.version ?: "", 0, 9, 1) }
         val attention = run?.attention
@@ -169,10 +173,14 @@ class LastRunTab(project: Project, parent: Disposable) : StatusTab(project, pare
     private fun selected(): StatusAttention? =
         ((tree.lastSelectedPathComponent as? DefaultMutableTreeNode)?.userObject as? RunRow)?.attention
 
-    /** `saffron trace <scenario>` in the Run tool window; it prints the replay's URL and opens it. */
+    /**
+     * `saffron trace <scenario>` in the Run tool window; it prints the replay's URL and opens it.
+     * With no row selected (an all-green run lists none), `saffron trace` opens every traced
+     * scenario of the run, or says how to keep traces when it kept none.
+     */
     private fun openReplay(): Boolean {
-        val a = selected() ?: return false
-        if (a.evidence.none { it.kind == "trace" }) {
+        val a = selected()
+        if (a != null && a.evidence.none { it.kind == "trace" }) {
             // An older runner has no trace setting, so following the second
             // half alone would bring this same message back.
             note.text = "No execution trace for \"${a.scenario}\". Open Replay needs saffron-ai 0.9.0 or later, with \"trace\": \"retain-on-failure\" in saffron.config.json; then run again."
@@ -185,7 +193,7 @@ class LastRunTab(project: Project, parent: Disposable) : StatusTab(project, pare
             // name are told apart. Written as it is: it starts with the
             // feature path, never a quote, so the field takes it whole,
             // quotes and spacing in the name included.
-            it.paths = "${a.feature}:${a.scenario}"
+            it.paths = a?.let { s -> "${s.feature}:${s.scenario}" } ?: ""
             // The run these rows list: the replay refuses a later one.
             it.extraArgs = shownRun?.let { run -> "--run $run" } ?: ""
         }
@@ -212,10 +220,18 @@ class LastRunTab(project: Project, parent: Disposable) : StatusTab(project, pare
 
     private fun openScenario(): Boolean {
         val a = selected() ?: return false
-        val vf = LocalFileSystem.getInstance().refreshAndFindFileByNioFile(projectRoot.resolve(a.feature)) ?: return false
-        val line = features.firstOrNull { it.path == a.feature }?.scenarios?.firstOrNull { it.name == a.baseScenario }?.line
-        OpenFileDescriptor(project, vf, ((line ?: 1) - 1).coerceAtLeast(0), 0).navigate(true)
         clearNote()
-        return true
+        return openScenario(features, a.feature, a.baseScenario)
+    }
+
+    /** The run's HTML report, in the system browser: the full story, every scenario and step. */
+    private fun openReport() {
+        val report = reportHtml?.let { projectRoot.resolve(it) }?.takeIf { java.nio.file.Files.exists(it) }
+        if (report == null) {
+            note.text = "No HTML report for the last run. Run something first."
+            return
+        }
+        clearNote()
+        BrowserUtil.browse(report.toUri())
     }
 }

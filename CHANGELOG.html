@@ -1,3 +1,9 @@
+<h3>0.5.0</h3>
+<ul>
+  <li><b>The Dashboard is the suite's quality page</b>, rendered by <code>saffron dashboard</code> in the run report's design and the same as in VS Code: tests, the share passing, failing scenarios and for how many runs in a row, flaky ones, ones the agent healed again and again, never run and left out of the last run, the slowest, pass rate and execution time over the last 20 runs, and results per tag. Click a scenario's name to open it. Needs <code>saffron-ai</code> 0.9.4 or later; with an older runner the tab says which version the project has.</li>
+  <li><b>Last Run: Open Report</b> opens the run's HTML report in your browser.</li>
+  <li><b>Last Run: Open Replay works when everything passed.</b> With no row to select it did nothing; it now opens every scenario the run traced, or says how to keep traces when the run kept none.</li>
+</ul>
 <h3>0.4.0</h3>
 <ul>
   <li><b>CI Runs tab.</b> The current branch's CI runs, GitHub Actions or Azure Pipelines, through <code>saffron runs</code>. <b>Import</b> runs <code>saffron import --run</code> and lists under the run what happened to each proposal and any warning. The Proposals tab names the CI run an imported proposal came from. From a red CI run to an accepted repair without leaving the IDE; the CI's own tool keeps the credentials. Needs <code>saffron-ai</code> 0.9.3 or later, with <code>gh</code> or <code>az</code> signed in; with an older runner the tab says which version the project has.</li>

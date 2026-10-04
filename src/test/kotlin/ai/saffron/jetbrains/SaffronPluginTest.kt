@@ -635,32 +635,18 @@ class SaffronPluginTest : BasePlatformTestCase() {
         assertNull(ago(null, now))
     }
 
-    fun `test the Dashboard opens a web page only for a click in its main frame`() {
-        val reports = "file:///work/shop/.saffron/"
-        fun nav(url: String, click: Boolean) = ai.saffron.jetbrains.ui.reportNavigation(url, reports, click)
-        val load = ai.saffron.jetbrains.ui.ReportNavigation.LOAD
-        val external = ai.saffron.jetbrains.ui.ReportNavigation.EXTERNAL
-        val cancel = ai.saffron.jetbrains.ui.ReportNavigation.CANCEL
-        assertEquals(external, nav("https://saffron-ai.io/docs", true))
-        assertEquals(external, nav("HTTP://example.com", true))
-        // A script, a redirect or an iframe: nothing opens.
-        assertEquals(cancel, nav("https://example.com/x", false))
-        assertEquals(cancel, nav("http://example.com/x", false))
-        // The report's own files and anchors, and loadHTML's page, load here whoever asked.
-        assertEquals(load, nav("${reports}reports/latest.html#s1", false))
-        assertEquals(load, nav("file:///jbcefbrowser/123", false))
-        assertEquals(load, nav("about:blank", false))
-        assertEquals(load, nav("data:image/png;base64,AA", true))
-        // Anything else is cancelled, a click or not.
-        assertEquals(cancel, nav("file:///etc/passwd", true))
-        assertEquals(cancel, nav("javascript:alert(1)", true))
-    }
-
     fun `test Open Replay names its run only to a runner that knows the option`() {
         assertTrue(ai.saffron.jetbrains.ui.runnerAtLeast("0.9.1", 0, 9, 1))
         assertTrue(ai.saffron.jetbrains.ui.runnerAtLeast("0.10.0-beta.1", 0, 9, 1))
         assertTrue(ai.saffron.jetbrains.ui.runnerAtLeast("1.0.0", 0, 9, 1))
         assertFalse(ai.saffron.jetbrains.ui.runnerAtLeast("0.9.0", 0, 9, 1))
         assertFalse(ai.saffron.jetbrains.ui.runnerAtLeast("", 0, 9, 1))
+    }
+
+    fun `test the Dashboard defines its opener before the page's own script`() {
+        val page = "<html><head><style></style></head><body><script>use()</script></body></html>"
+        val html = ai.saffron.jetbrains.ui.withOpener(page, "open(f, s)")
+        assertTrue(html.indexOf("window.saffronOpen") in 0 until html.indexOf("</head>"))
+        assertEquals(page, ai.saffron.jetbrains.ui.withOpener(page, ""))
     }
 }
