@@ -4,6 +4,7 @@ import ai.saffron.jetbrains.run.SaffronCommand
 import ai.saffron.jetbrains.run.SaffronConfigurationType
 import ai.saffron.jetbrains.run.SaffronRunConfiguration
 import ai.saffron.jetbrains.run.SaffronRunner
+import ai.saffron.jetbrains.run.SaffronScenarioRun
 import ai.saffron.jetbrains.run.SaffronSettingsEditor
 import ai.saffron.jetbrains.ui.SaffronProjectScan
 import ai.saffron.jetbrains.ui.SaffronRoots
@@ -17,6 +18,7 @@ import com.intellij.execution.RunManager
 import com.intellij.execution.actions.ConfigurationContext
 import com.intellij.execution.configurations.ConfigurationTypeUtil
 import com.intellij.execution.configurations.RuntimeConfigurationError
+import com.intellij.openapi.actionSystem.ActionManager
 import com.intellij.openapi.actionSystem.ActionPlaces
 import com.intellij.openapi.actionSystem.CommonDataKeys
 import com.intellij.openapi.actionSystem.impl.SimpleDataContext
@@ -33,6 +35,168 @@ import java.nio.file.Path
 import javax.swing.JLabel
 
 class SaffronRunConfigurationTest : BasePlatformTestCase() {
+
+    fun `test a Run lens runs its scenario by name, in a configuration of its own that nothing else leaks into`() {
+        val root = FileUtil.toSystemIndependentName(project.basePath!!)
+        val runManager = RunManager.getInstance(project)
+        val type = SaffronConfigurationType.INSTANCE
+        // The user saved the lens's configuration once and gave it an environment.
+        val saved = runManager.createConfiguration("Run 'Successful login'", type.factory)
+        runManager.addConfiguration(saved)
+        (saved.configuration as SaffronRunConfiguration).apply { paths = "features/login.saffron"; extraArgs = "--env staging" }
+        // A template with switches of its own: none may reach a lens run.
+        val template = runManager.getConfigurationTemplate(type.factory).configuration as SaffronRunConfiguration
+        template.tags = "@smoke"; template.rerecord = true; template.extraArgs = "--workers 2"
+        try {
+            val first = SaffronScenarioRun.configuration(project, root, "features/login.saffron:Successful login", "Successful login", "run")
+            val c = first.configuration as SaffronRunConfiguration
+            assertNotSame(saved, first)
+            assertEquals("Saffron: Run 'Successful login'", first.name)
+            assertTrue(first.isTemporary)
+            assertEquals(root, c.workingDirectory)
+            assertEquals(listOf("run", "features/login.saffron:Successful login"), SaffronCommand.arguments(c))
+            assertSame(first, SaffronScenarioRun.configuration(project, root, "features/login.saffron:Successful login", "Successful login", "run"))
+            assertSame(first, runManager.selectedConfiguration)
+            // The saved one is the user's: still there, still running what it ran.
+            assertSame(saved, runManager.findConfigurationByTypeAndName(type, "Run 'Successful login'"))
+            assertEquals(listOf("run", "features/login.saffron", "--env", "staging"), SaffronCommand.arguments(saved.configuration as SaffronRunConfiguration))
+            // Replay only and Headed are configurations of their own.
+            val replay = SaffronScenarioRun.configuration(project, root, "features/login.saffron:Successful login", "Successful login", "replay")
+            val headed = SaffronScenarioRun.configuration(project, root, "features/login.saffron:Successful login", "Successful login", "headed")
+            assertEquals("Run 'Successful login' (replay only)", replay.name)
+            assertEquals(listOf("run", "features/login.saffron:Successful login", "--no-agent"), SaffronCommand.arguments(replay.configuration as SaffronRunConfiguration))
+            assertEquals(listOf("run", "features/login.saffron:Successful login", "--headed"), SaffronCommand.arguments(headed.configuration as SaffronRunConfiguration))
+        } finally {
+            template.tags = ""; template.rerecord = false; template.extraArgs = ""
+            runManager.getConfigurationSettingsList(type).forEach(runManager::removeConfiguration)
+        }
+    }
+
+    fun `test a scenario is named by its name, or by its line when the runner would read the name as one`() {
+        assertEquals("features/a.saffron:Login", SaffronScenarioRun.target("features/a.saffron", "Login", 3))
+        assertEquals("features/a.saffron:3", SaffronScenarioRun.target("features/a.saffron", "42", 3))
+        assertEquals("features/a.saffron:3", SaffronScenarioRun.target("features/a.saffron", "10:30", 3))
+        assertEquals("features/a.saffron:3", SaffronScenarioRun.target("features/a.saffron", "", 3))
+        assertEquals("features/a.saffron:10:30 sharp", SaffronScenarioRun.target("features/a.saffron", "10:30 sharp", 3))
+    }
+
+    fun `test a tag line followed by a comment belongs to the scenario it tags, and another language finds nothing`() {
+        val tagged = "Feature: F\n  Scenario: A\n    Given x\n\n  @smoke\n  # flaky on CI\n\n  Scenario: B\n"
+        assertEquals(listOf("A" to 2, "A" to 2, "B" to 8, "B" to 8, "B" to 8, "B" to 8), (2..7).map { SaffronScenarioRun.scenarioAt(tagged, it) })
+        // Italian has its own "Scenario:" too, and outlines English does not know: the whole file runs, not the scenario above.
+        val italian = "# language: it\nFunzionalità: F\n  Scenario: Primo\n    Dato x\n  Schema dello scenario: Secondo\n    Dato <y>\n"
+        assertNull(SaffronScenarioRun.scenarioAt(italian, 5))
+        assertEquals("Works" to 2, SaffronScenarioRun.scenarioAt("# language: en\nScenario: Works\n", 1))
+    }
+
+    fun `test a lens on a scenario of the same name in another file gets its own configuration`() {
+        val root = FileUtil.toSystemIndependentName(project.basePath!!)
+        val runManager = RunManager.getInstance(project)
+        try {
+            val a = SaffronScenarioRun.configuration(project, root, "features/a.saffron:Happy path", "Happy path", "run")
+            val b = SaffronScenarioRun.configuration(project, root, "features/b.saffron:Happy path", "Happy path", "run")
+            assertNotSame(a, b)
+            assertEquals(listOf("Run 'Happy path'", "Run 'Happy path' in features/b.saffron"), listOf(a.name, b.name))
+            // a's still runs a's scenario: its Run tab reruns what it ran.
+            assertEquals(listOf("run", "features/a.saffron:Happy path"), SaffronCommand.arguments(a.configuration as SaffronRunConfiguration))
+            assertSame(b, SaffronScenarioRun.configuration(project, root, "features/b.saffron:Happy path", "Happy path", "run"))
+        } finally {
+            runManager.getConfigurationSettingsList(SaffronConfigurationType.INSTANCE).forEach(runManager::removeConfiguration)
+        }
+    }
+
+    fun `test the scenario at a line is the one whose block holds it`() {
+        val text = listOf(
+            "Feature: Login", //           0
+            "  Background:", //            1
+            "    Given I am on the page", // 2
+            "  @smoke", //                 3
+            "  Scenario: Works", //        4
+            "    Given a doc string", //   5
+            "      \"\"\"", //              6
+            "      Scenario: Quoted", //   7
+            "      \"\"\"", //              8
+            "  Scenario Outline: Roles", // 9
+            "    Examples:", //            10
+            "      | role |", //           11
+            "  StepSet: Login", //         12
+            "    Given x", //              13
+        ).joinToString("\n")
+        val at = (0..13).map { SaffronScenarioRun.scenarioAt(text, it) }
+        assertEquals(listOf(null, null, null), at.subList(0, 3))
+        // A tag line belongs to the scenario it tags; a doc string's text is not a scenario.
+        assertEquals(List(6) { "Works" to 5 }, at.subList(3, 9))
+        assertEquals(List(3) { "Roles" to 10 }, at.subList(9, 12))
+        assertEquals(listOf(null, null), at.subList(12, 14))
+    }
+
+    fun `test right-click Run in the editor runs the scenario at the caret, and the whole file outside one`() {
+        val base = Path.of(project.basePath!!)
+        try {
+            Files.createDirectories(base.resolve("features"))
+            Files.writeString(base.resolve("saffron.config.json"), "{}")
+            Files.writeString(base.resolve("features/login.saffron"), "Feature: Login\n\nScenario: Works\n    Given I am on the login page\n")
+            val vf = LocalFileSystem.getInstance().refreshAndFindFileByNioFile(base.resolve("features/login.saffron"))!!
+            IndexingTestUtil.waitUntilIndexesAreReady(project)
+            myFixture.configureFromExistingVirtualFile(vf)
+            fun offeredAt(line: Int): SaffronRunConfiguration {
+                myFixture.editor.caretModel.moveToLogicalPosition(com.intellij.openapi.editor.LogicalPosition(line, 0))
+                val dataContext = SimpleDataContext.builder()
+                    .add(CommonDataKeys.PROJECT, project)
+                    .add(CommonDataKeys.EDITOR, myFixture.editor)
+                    .add(Location.DATA_KEY, PsiLocation(myFixture.file))
+                    .build()
+                val context = ConfigurationContext.getFromContext(dataContext, ActionPlaces.UNKNOWN)
+                return (context.configurationsFromContext ?: emptyList()).mapNotNull { it.configuration as? SaffronRunConfiguration }.single()
+            }
+            val inScenario = offeredAt(3)
+            assertEquals("Run 'Works'", inScenario.name)
+            assertEquals("features/login.saffron:Works", inScenario.paths)
+            val inHeader = offeredAt(0)
+            assertEquals("Run login.saffron", inHeader.name)
+            assertEquals("features/login.saffron", inHeader.paths)
+            // The lens's Replay only configuration has the same paths, and is not what a plain right-click Run reuses.
+            val replay = SaffronScenarioRun.configuration(project, FileUtil.toSystemIndependentName(base.toString()), "features/login.saffron:Works", "Works", "replay")
+            myFixture.editor.caretModel.moveToLogicalPosition(com.intellij.openapi.editor.LogicalPosition(3, 0))
+            val inWorks = SimpleDataContext.builder()
+                .add(CommonDataKeys.PROJECT, project)
+                .add(CommonDataKeys.EDITOR, myFixture.editor)
+                .add(Location.DATA_KEY, PsiLocation(myFixture.file))
+                .build()
+            assertNotSame(replay, ConfigurationContext.getFromContext(inWorks, ActionPlaces.UNKNOWN).findExisting())
+            RunManager.getInstance(project).removeConfiguration(replay)
+            // A runner from before scenario targets: the whole file, as before.
+            Files.createDirectories(base.resolve("node_modules/saffron-ai"))
+            Files.writeString(base.resolve("node_modules/saffron-ai/package.json"), """{"version":"0.9.7"}""")
+            assertEquals("features/login.saffron", offeredAt(3).paths)
+        } finally {
+            Files.deleteIfExists(base.resolve("saffron.config.json"))
+            base.resolve("features").toFile().deleteRecursively()
+            base.resolve("node_modules").toFile().deleteRecursively()
+        }
+    }
+
+    fun `test a Run lens works while the IDE indexes`() {
+        assertTrue(ActionManager.getInstance().getAction("saffron.runScenario") is com.intellij.openapi.project.DumbAware)
+    }
+
+    fun `test LSP4IJ finds the action a Run lens names`() {
+        assertTrue(ActionManager.getInstance().getAction("saffron.runScenario") is SaffronRunScenarioAction)
+    }
+
+    fun `test a Run lens's argument reads into the action's model`() {
+        // As lsp4j hands it over: the arguments are JSON elements.
+        val lens = org.eclipse.lsp4j.Command(
+            "Replay only",
+            "saffron.runScenario",
+            listOf(com.google.gson.JsonParser.parseString("""{"root":"/p","target":"features/login.saffron:Successful login","line":12,"scenario":"Successful login","mode":"replay"}""")),
+        )
+        val make = com.redhat.devtools.lsp4ij.commands.LSPCommand::class.java
+            .getDeclaredConstructor(org.eclipse.lsp4j.Command::class.java, ClassLoader::class.java)
+            .apply { isAccessible = true }
+        val argument = make.newInstance(lens, javaClass.classLoader).getArgumentAt(0, RunScenarioArgument::class.java)
+        assertEquals(listOf("/p", "features/login.saffron:Successful login", "Successful login", "replay"), listOf(argument?.root, argument?.target, argument?.scenario, argument?.mode))
+    }
 
     private fun newConfiguration(name: String = "t"): SaffronRunConfiguration {
         val type = SaffronConfigurationType.INSTANCE

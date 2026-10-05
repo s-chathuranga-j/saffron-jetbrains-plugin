@@ -16,4 +16,11 @@
                                 serverId="saffron"
                                 languageId="saffron"/>
     </extensions>
+    <actions>
+        <!-- A Run lens from saffron lsp: LSP4IJ runs the action named after the lens's command. -->
+        <action id="saffron.runScenario"
+                class="ai.saffron.jetbrains.SaffronRunScenarioAction"
+                text="Run Saffron Scenario"
+                description="Run the scenario under a Run lens: saffron run file:line"/>
+    </actions>
 </idea-plugin>

@@ -495,6 +495,9 @@ class SaffronPluginTest : BasePlatformTestCase() {
         assertEquals(listOf("trace", "--run", "7", "--provider", "github"), ai.saffron.jetbrains.ui.ciRunArgs("trace", "7", "github", 100))
         assertEquals(listOf("report", "--run", "7", "--provider", "github", "--max-download", "100"), ai.saffron.jetbrains.ui.ciRunArgs("report", "7", "github", 100))
         assertEquals(listOf("report", "--run", "7"), ai.saffron.jetbrains.ui.ciRunArgs("report", "7", null, 0))
+        // trace downloads a run no longer on disk, and takes the limit from saffron-ai 0.9.8.
+        assertEquals(listOf("trace", "--run", "7", "--max-download", "100"), ai.saffron.jetbrains.ui.ciRunArgs("trace", "7", null, 100, "0.9.8"))
+        assertEquals(listOf("trace", "--run", "7"), ai.saffron.jetbrains.ui.ciRunArgs("trace", "7", null, 100, "0.9.7"))
     }
 
     fun `test a viewed CI run without results, too large, refused or from an older runner says so in one row`() {

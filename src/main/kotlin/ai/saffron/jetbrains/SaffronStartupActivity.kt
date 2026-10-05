@@ -26,10 +26,11 @@ class SaffronStartupActivity : ProjectActivity {
             hintOnce(
                 project,
                 LSP_HINT_SHOWN_KEY,
-                "Saffron: install LSP4IJ for completion and diagnostics",
-                "Highlighting, run configurations and the Saffron tool window work already. " +
-                    "Step completion, StepSet go-to-definition, hover and diagnostics come from the " +
-                    "language server, which needs the free <b>LSP4IJ</b> plugin (Settings, Plugins, Marketplace). " +
+                "Saffron: install LSP4IJ for completion, diagnostics and Run lenses",
+                "Highlighting, run configurations and the Saffron tool window work already, and right-click Run " +
+                    "inside a scenario runs that scenario alone. Step completion, StepSet go-to-definition, hover, " +
+                    "diagnostics and the Run lenses above each scenario come from the language server, which needs " +
+                    "the free <b>LSP4IJ</b> plugin (Settings, Plugins, Marketplace). " +
                     "If LSP4IJ is not available for this IDE build yet, they start working once it is.",
             )
             return

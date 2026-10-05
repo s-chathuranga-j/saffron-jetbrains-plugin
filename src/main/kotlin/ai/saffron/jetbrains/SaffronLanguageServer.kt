@@ -3,6 +3,7 @@ package ai.saffron.jetbrains
 import ai.saffron.jetbrains.run.SaffronCommand
 import ai.saffron.jetbrains.ui.SaffronStatusService
 import com.intellij.openapi.project.Project
+import com.intellij.openapi.vfs.VirtualFile
 import com.redhat.devtools.lsp4ij.server.OSProcessStreamConnectionProvider
 
 /**
@@ -16,4 +17,7 @@ class SaffronLanguageServer(project: Project) : OSProcessStreamConnectionProvide
         val binary = roots.firstNotNullOfOrNull(SaffronCommand::localBinary)
         commandLine = SaffronCommand.base(project.basePath, binary).withParameters("lsp")
     }
+
+    // Run lenses are opt-in: their command is this plugin's saffron.runScenario action.
+    override fun getInitializationOptions(rootUri: VirtualFile?): Any = mapOf("runLenses" to true)
 }

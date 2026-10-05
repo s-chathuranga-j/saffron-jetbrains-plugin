@@ -239,13 +239,14 @@ internal fun viewRows(view: RunView?, problem: String?, version: String? = null,
 }
 
 /**
- * `<command> --run <id>` with the provider; `--max-download` only for `report`,
- * which downloads: `saffron trace` in saffron-ai 0.9.7 rejects it, and replays what report kept.
+ * `<command> --run <id>` with the provider, and `--max-download` for `report`, and for
+ * `trace` from saffron-ai 0.9.8 ([version]), which downloads a run no longer on disk:
+ * `saffron trace` in 0.9.7 rejects the option.
  */
-internal fun ciRunArgs(command: String, runId: String, provider: String?, limitMb: Long): List<String> =
+internal fun ciRunArgs(command: String, runId: String, provider: String?, limitMb: Long, version: String? = null): List<String> =
     listOf(command, "--run", runId) +
         (provider?.let { listOf("--provider", it) } ?: emptyList()) +
-        (if (command == "report" && limitMb > 0) listOf("--max-download", limitMb.toString()) else emptyList())
+        (if (limitMb > 0 && (command == "report" || (command == "trace" && runnerAtLeast(version ?: "", 0, 9, 8)))) listOf("--max-download", limitMb.toString()) else emptyList())
 
 /** `feature:name` for `saffron trace`: the display name keeps an Examples row's "(example 1)" suffix. */
 internal fun ciTraceSelector(s: CiScenario): String = "${s.feature}:${s.displayName ?: s.scenario}"
@@ -591,7 +592,7 @@ class CiRunsTab(
 
     /** `report --run <id>` with the provider and the download limit, as [run]'s view and actions use it. */
     private fun reportArgs(command: String, run: CiRun): List<String> =
-        ciRunArgs(command, run.id, listed?.provider, allowed[run.id] ?: ciMaxDownloadMb().toLong())
+        ciRunArgs(command, run.id, listed?.provider, allowed[run.id] ?: ciMaxDownloadMb().toLong(), latest?.version)
 
     /** The selected run's results, once per run and project, and only while the tab is on screen. */
     private fun viewSelected() {
