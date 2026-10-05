@@ -1,6 +1,12 @@
 package ai.saffron.jetbrains.ui
 
 import ai.saffron.jetbrains.run.SaffronCommand
+import ai.saffron.jetbrains.run.SaffronRunner
+import com.intellij.ide.util.PropertiesComponent
+import com.intellij.openapi.ui.MessageDialogBuilder
+import java.awt.event.HierarchyEvent
+import java.awt.event.MouseAdapter
+import java.awt.event.MouseEvent
 import com.google.gson.Gson
 import com.intellij.execution.configurations.GeneralCommandLine
 import com.intellij.execution.process.CapturingProcessHandler
@@ -65,6 +71,40 @@ class CiRuns(
     val error: String? = null,
 )
 
+class CiArtifact(val name: String = "", val sizeBytes: Long = 0)
+class CiBundle(val folder: String = "", val cached: Boolean = false, val artifacts: List<CiArtifact> = emptyList())
+class CiTotals(val green: Int = 0, val yellow: Int = 0, val red: Int = 0, val aiCalls: Int? = null, val costUsd: Double? = null)
+class CiScenario(
+    val feature: String = "",
+    val scenario: String = "",
+    val displayName: String? = null,
+    val status: String = "",
+    val verified: Boolean? = null,
+    val failingStep: String? = null,
+    val error: String? = null,
+    val narrative: String? = null,
+    val trace: String? = null,
+)
+class CiViewProposal(val feature: String = "", val scenario: String = "", val verified: Boolean? = null, val importable: Boolean = false, val reason: String? = null)
+
+/**
+ * `saffron report --run <id> --json`: a CI run's results, viewed without importing.
+ * [bundle] null with no [error]: the run has none, [reason] says why. [kind] "too-large"
+ * with [sizeBytes]: above `--max-download`, ask and run again with a higher limit.
+ */
+class RunView(
+    val error: String? = null,
+    val kind: String? = null,
+    val sizeBytes: Long? = null,
+    val bundle: CiBundle? = null,
+    val reasonKind: String? = null,
+    val reason: String? = null,
+    val totals: CiTotals? = null,
+    val scenarios: List<CiScenario> = emptyList(),
+    val proposals: List<CiViewProposal> = emptyList(),
+    val warnings: List<String> = emptyList(),
+)
+
 class ImportedOutcome(val file: String = "", val feature: String = "", val scenario: String = "", val outcome: String = "", val reason: String? = null)
 
 /** `saffron import --run <id> --json`: what happened to each proposal, or why nothing was imported. */
@@ -117,8 +157,82 @@ internal class RunNode(
     val icon: Icon? = null,
     val tooltip: String? = null,
     val run: CiRun? = null,
+    /** A viewed run's scenario: Open Trace replays it when it has a trace. */
+    val scenario: CiScenario? = null,
+    /** A viewed run's results above the download limit, in bytes: double-click asks to download. */
+    val tooLarge: Long? = null,
 ) {
     override fun toString(): String = label
+}
+
+/** Whole megabytes, rounded up: a limit of this many lets [bytes] through whether the runner counts MB or MiB. */
+internal fun megabytes(bytes: Long): Long = ((bytes + 999_999) / 1_000_000).coerceAtLeast(1)
+
+/** The download limit in MB from the settings; 0 is none. */
+internal fun ciMaxDownloadMb(): Int = PropertiesComponent.getInstance().getInt(CI_MAX_DOWNLOAD_KEY, CI_MAX_DOWNLOAD_DEFAULT)
+
+internal const val CI_MAX_DOWNLOAD_KEY = "ai.saffron.jetbrains.ciMaxDownloadMB"
+internal const val CI_MAX_DOWNLOAD_DEFAULT = 100
+
+private val NO_BUNDLE = mapOf("running" to "No results yet", "expired" to "Results expired", "none" to "No results uploaded")
+
+/**
+ * The rows under a viewed run: what `saffron report --run <id> --json` answered ([view]),
+ * or why it did not ([problem]). [version] is the project's saffron-ai, [limitMb] the
+ * download limit the answer was asked with. CI text is plain text; tooltips escape it.
+ */
+internal fun viewRows(view: RunView?, problem: String?, version: String? = null, limitMb: Int = 0): List<DefaultMutableTreeNode> {
+    fun row(label: String, detail: String = "", icon: Icon? = null, tip: String? = null, scenario: CiScenario? = null, tooLarge: Long? = null) =
+        DefaultMutableTreeNode(RunNode(label, detail, icon, tip, scenario = scenario, tooLarge = tooLarge))
+    val error = view?.error ?: problem ?: if (view == null) "saffron report gave no answer" else null
+    if (error != null) {
+        if (error.contains("unknown option")) {
+            val has = version?.takeIf { it.isNotBlank() }?.let { "this project has $it. " } ?: ""
+            return listOf(row("Viewing results needs saffron-ai 0.9.7 or later", "${has}Update it: npm i -D saffron-ai@latest.", AllIcons.General.Warning, tooltipHtml(error)))
+        }
+        val size = view?.sizeBytes
+        if (view?.kind == "too-large" && size != null) {
+            val limit = if (limitMb > 0) "above the $limitMb MB download limit" else "above the download limit"
+            return listOf(row("This run's results are ${megabytes(size)} MB", "$limit: double-click to download", AllIcons.Actions.Download, tooltipHtml(error), tooLarge = size))
+        }
+        return listOf(row("Results unavailable", error, AllIcons.General.Error, tooltipHtml(error)))
+    }
+    view!!
+    if (view.bundle == null) {
+        return listOf(row(NO_BUNDLE[view.reasonKind] ?: "No results", view.reason.orEmpty(), AllIcons.General.Information, tooltipHtml(view.reason)))
+    }
+    val rows = view.warnings.map { row(it, "", AllIcons.General.Warning, tooltipHtml(it)) }.toMutableList()
+    view.totals?.let { t ->
+        val cost = listOfNotNull(t.aiCalls?.let { "$it AI call${if (it == 1) "" else "s"}" }, t.costUsd?.let { "$" + "%.2f".format(it) }).joinToString(" · ")
+        rows += row("${t.red} failed · ${t.yellow} healed · ${t.green} passed", cost, AllIcons.General.Information)
+    }
+    for (status in listOf("red", "yellow")) {
+        for (s in view.scenarios.filter { it.status == status }) {
+            val firstError = s.error?.lineSequence()?.firstOrNull { it.isNotBlank() }?.trim()
+            val detail = listOfNotNull(s.failingStep, firstError).joinToString(" · ").ifEmpty { if (status == "yellow") "healed" else "failed" }
+            rows += row(
+                s.displayName ?: s.scenario,
+                detail,
+                if (status == "red") AllIcons.RunConfigurations.TestFailed else AllIcons.General.Warning,
+                tooltipHtml("${s.feature} › ${s.scenario}", s.failingStep, firstError, s.narrative, if (s.trace != null) "Double-click or Open Trace replays it." else null),
+                scenario = s,
+            )
+        }
+    }
+    if (view.proposals.isNotEmpty()) {
+        val n = view.proposals.size
+        val node = row("$n proposal${if (n == 1) "" else "s"}: ${view.proposals.count { it.importable }} importable", "Import Run files them here", AllIcons.Vcs.Patch)
+        for (p in view.proposals) {
+            val name = "${p.feature.substringAfterLast('/')} › ${p.scenario}"
+            node.add(
+                if (p.importable) row(name, "importable", AllIcons.Actions.Checked)
+                else row(name, "not importable: ${p.reason ?: "no reason given"}", AllIcons.General.Error, tooltipHtml(p.reason)),
+            )
+        }
+        rows += node
+    }
+    if (rows.isEmpty()) rows += row("No results in this run's bundle", "", AllIcons.General.Information)
+    return rows
 }
 
 /** CI-controlled text as a Swing tooltip: control characters out, markup escaped, one line each. */
@@ -149,6 +263,8 @@ internal fun ago(iso: String?, now: Instant = Instant.now()): String? {
 class CiRunsTab(
     project: Project,
     parent: Disposable,
+    /** Whether the tab is on screen; tests stand in for it. Results load only for a tab someone looks at. */
+    private val visible: (() -> Boolean)? = null,
     private val trusted: () -> Boolean = { SaffronCommand.trusted(project) },
 ) : StatusTab(project, parent) {
 
@@ -174,6 +290,12 @@ class CiRunsTab(
     private val imports = mutableMapOf<String, RunImport>()
     /** Imports in flight, as "root|run id": a project switch does not forget them, only their own end does. */
     private val importing = mutableSetOf<String>()
+    /** Viewed results per run id (`saffron report --run`), for the shown project: a switch clears them. */
+    private val views = mutableMapOf<String, Pair<RunView?, String?>>()
+    /** Views in flight, as "root|run id". */
+    private val viewing = mutableSetOf<String>()
+    /** Per run id: the download limit (MB) the user agreed to for a run above the setting's. */
+    private val allowed = mutableMapOf<String, Long>()
     private var latest: ProjectStatus? = null
     /** The root the rows and notes belong to. */
     private var shownFor: Path? = null
@@ -201,15 +323,35 @@ class CiRunsTab(
     init {
         toolbar = toolbar(
             action("Import Run", "saffron import --run: the selected run's proposals, checked against this checkout, and its report, screenshots and traces", AllIcons.Actions.Download) { importSelected() },
+            action("Open Report", "saffron report --run: the selected run's HTML report in your browser, without importing", AllIcons.Actions.Preview) { openReport() },
+            action("Open Trace", "saffron trace --run: replay the selected scenario of the run, without importing", AllIcons.Actions.Execute) { openTrace() },
             action("Open in Browser", "The selected run on GitHub or Azure DevOps", AllIcons.General.Web) { openSelected() },
-            action("Refresh", "List the runs again (saffron runs)", AllIcons.Actions.Refresh) { loadRuns() },
+            action("Refresh", "List the runs again (saffron runs) and load the selected run's results again", AllIcons.Actions.Refresh) {
+                views.clear()
+                loadRuns()
+            },
         )
         tree.emptyText.text = "Loading…"
         tree.addTreeSelectionListener {
             if (!rebuilding) {
                 ownNote = null
                 clearNote()
+                viewSelected()
             }
+        }
+        tree.addMouseListener(object : MouseAdapter() {
+            override fun mouseClicked(e: MouseEvent) {
+                if (e.clickCount != 2) return
+                val r = (tree.getPathForLocation(e.x, e.y)?.lastPathComponent as? DefaultMutableTreeNode)?.userObject as? RunNode ?: return
+                when {
+                    r.tooLarge != null -> selectedRun()?.let { askDownload(it, r.tooLarge) }
+                    r.scenario?.trace != null -> openTrace()
+                }
+            }
+        })
+        // Shown again: the selected run's results, if they were waiting for it.
+        addHierarchyListener { e ->
+            if (e.changeFlags and HierarchyEvent.SHOWING_CHANGED.toLong() != 0L && showing()) viewSelected()
         }
         // Run names and errors come from CI: never rendered as HTML.
         note.putClientProperty("html.disable", true)
@@ -270,6 +412,8 @@ class CiRunsTab(
             listed = null
             listedFor = null
             imports.clear()
+            views.clear()
+            allowed.clear()
             ownNote = null
             clearNote()
             root.removeAllChildren()
@@ -305,6 +449,7 @@ class CiRunsTab(
                     ?: CiRuns(problem = CiProblem("failed", runs?.error ?: problem ?: "saffron runs gave no answer"))
                 listedFor = base
                 rebuild()
+                viewSelected()
             }, project.disposed)
         }
     }
@@ -380,6 +525,10 @@ class CiRunsTab(
                     run,
                 ),
             )
+            when {
+                "$projectRoot|${run.id}" in viewing -> node.add(DefaultMutableTreeNode(RunNode("Loading results…", "saffron report --run ${run.id}", AllIcons.Process.Step_1)))
+                else -> views[run.id]?.let { (view, problem) -> viewRows(view, problem, latest?.version, (allowed[run.id] ?: ciMaxDownloadMb().toLong()).toInt()).forEach(node::add) }
+            }
             imports[run.id]?.let { result -> outcomeRows(result).forEach(node::add) }
             root.add(node)
         }
@@ -421,6 +570,117 @@ class CiRunsTab(
         // A child row stands for its run.
         while (node != null && (node.userObject as? RunNode)?.run == null) node = node.parent as? DefaultMutableTreeNode
         return (node?.userObject as? RunNode)?.run
+    }
+
+    private fun showing(): Boolean = visible?.invoke() ?: isShowing
+
+    /** `report --run <id>` with the provider and the download limit, as [run]'s view and actions use it. */
+    private fun reportArgs(command: String, run: CiRun): List<String> {
+        val limit = allowed[run.id] ?: ciMaxDownloadMb().toLong()
+        return listOfNotNull(command, "--run", run.id) +
+            (listed?.provider?.let { listOf("--provider", it) } ?: emptyList()) +
+            (if (limit > 0) listOf("--max-download", limit.toString()) else emptyList())
+    }
+
+    /** The selected run's results, once per run and project, and only while the tab is on screen. */
+    private fun viewSelected() {
+        if (!showing() || !trusted()) return
+        val run = selectedRun() ?: return
+        val base = listedFor ?: return
+        if (base != projectRoot || run.id in views) return
+        view(base, run)
+    }
+
+    /** `saffron report --run <id> --json` as a background task Cancel stops, like Import Run. */
+    private fun view(base: Path, run: CiRun) {
+        val key = "$base|${run.id}"
+        if (!viewing.add(key)) return
+        val version = latest?.version
+        val args = reportArgs("report", run) + "--json"
+        rebuild()
+        expand(run)
+        object : Task.Backgroundable(project, "Loading the results of ${run.name} #${run.number}", true) {
+            private var answer: Pair<RunView?, String?> = null to null
+
+            override fun run(indicator: ProgressIndicator) {
+                answer = saffronJson(base.toString(), RunView::class.java, *args.toTypedArray(), version = version, run = tracked { it.runProcessWithProgressIndicator(indicator) })
+            }
+
+            override fun onCancel() {
+                viewing -= key
+                if (base == projectRoot) {
+                    say("Loading the results of ${run.name} #${run.number} was cancelled. Select the run again to load them.")
+                    rebuild()
+                }
+            }
+
+            override fun onFinished() {
+                if (viewing.remove(key) && base == projectRoot) rebuild()
+            }
+
+            override fun onSuccess() {
+                viewing -= key
+                // Loaded for a project no longer shown: dropped, the shown one has its own.
+                if (base != projectRoot || listedFor != base) return
+                views[run.id] = answer
+                rebuild()
+                expand(run)
+                val (view, _) = answer
+                if (view?.kind == "too-large" && view.sizeBytes != null && showing() && selectedRun()?.id == run.id) askDownload(run, view.sizeBytes)
+            }
+        }.queue()
+    }
+
+    /** Above the download limit: asks, and loads again with a limit above the run's size. */
+    private fun askDownload(run: CiRun, sizeBytes: Long) {
+        val base = listedFor ?: return
+        if (base != projectRoot) return
+        val mb = megabytes(sizeBytes)
+        if (!MessageDialogBuilder.yesNo("Download CI Results", "This run's results are $mb MB. Download?").yesText("Download").noText("Not Now").ask(project)) return
+        allowed[run.id] = mb + 1
+        views.remove(run.id)
+        view(base, run)
+    }
+
+    private fun expand(run: CiRun) {
+        for (i in 0 until root.childCount) {
+            val child = root.getChildAt(i) as DefaultMutableTreeNode
+            if ((child.userObject as? RunNode)?.run?.id == run.id) tree.expandPath(TreePath(child.path))
+        }
+    }
+
+    /** The selected run, when it is the shown project's; else says to select one. */
+    private fun runHere(): CiRun? {
+        val run = selectedRun()
+        if (run == null || listedFor == null || listedFor != projectRoot) {
+            say("Select a run first.")
+            return null
+        }
+        return run
+    }
+
+    /** `saffron report --run <id>`: renders the run's report and opens it in the browser. Files nothing. */
+    private fun openReport() {
+        val run = runHere() ?: return
+        SaffronRunner.execute(project, "Saffron: CI report") {
+            it.command = "report"
+            it.extraArgs = reportArgs("report", run).drop(1).joinToString(" ")
+        }
+    }
+
+    /** `saffron trace --run <id> <feature:scenario>`: the selected scenario's replay, view-only. */
+    private fun openTrace() {
+        val run = runHere() ?: return
+        val s = ((tree.lastSelectedPathComponent as? DefaultMutableTreeNode)?.userObject as? RunNode)?.scenario
+        if (s?.trace == null) {
+            say(if (s == null) "Select a failed or healed scenario under the run." else "No trace for \"${s.scenario}\" in this run.")
+            return
+        }
+        SaffronRunner.execute(project, "Saffron: CI replay") {
+            it.command = "trace"
+            it.paths = "${s.feature}:${s.scenario}"
+            it.extraArgs = reportArgs("trace", run).drop(1).joinToString(" ")
+        }
     }
 
     private fun openSelected() {
@@ -477,10 +737,7 @@ class CiRunsTab(
                 imports[run.id] = outcome
                 say(summary(outcome, run))
                 rebuild()
-                for (i in 0 until root.childCount) {
-                    val child = root.getChildAt(i) as DefaultMutableTreeNode
-                    if ((child.userObject as? RunNode)?.run?.id == run.id) tree.expandPath(TreePath(child.path))
-                }
+                expand(run)
                 // The proposals, the report and the evidence changed on disk.
                 refreshStatus()
             }

@@ -14,6 +14,13 @@ import ai.saffron.jetbrains.ui.evidenceCopies
 import ai.saffron.jetbrains.ui.ago
 import ai.saffron.jetbrains.ui.runnerError
 import ai.saffron.jetbrains.ui.tooltipHtml
+import ai.saffron.jetbrains.ui.RunView
+import ai.saffron.jetbrains.ui.viewRows
+import ai.saffron.jetbrains.ui.megabytes
+import ai.saffron.jetbrains.ui.CI_MAX_DOWNLOAD_KEY
+import com.google.gson.Gson
+import com.intellij.openapi.ui.TestDialog
+import com.intellij.openapi.ui.TestDialogManager
 import com.intellij.ide.util.PropertiesComponent
 import com.intellij.openapi.actionSystem.DefaultActionGroup
 import com.intellij.openapi.actionSystem.impl.ActionToolbarImpl
@@ -437,6 +444,149 @@ class SaffronPluginTest : BasePlatformTestCase() {
             assertEquals("", UIUtil.findComponentsOfType(tab, JBLabel::class.java).single().text)
         } finally {
             base.resolve("node_modules").toFile().deleteRecursively()
+        }
+    }
+
+    private val viewed = """{"run":{"provider":"github","id":"7","attempt":1},""" +
+        """"bundle":{"folder":".saffron/ci/github-7/attempt-1","cached":false,"artifacts":[{"name":"saffron-bundle","sizeBytes":123}]},""" +
+        """"totals":{"green":10,"yellow":1,"red":1,"aiCalls":14,"costUsd":0.42},""" +
+        """"scenarios":[{"feature":"features/cart.saffron","scenario":"Add","status":"yellow","narrative":"the button moved"},""" +
+        """{"feature":"features/login.saffron","scenario":"Sign in","displayName":"<b>Sign in</b>","status":"red","failingStep":"When I click \"Log in\"",""" +
+        """"error":"Timeout 30000ms\n    at x","trace":".saffron/ci/github-7/attempt-1/artifacts/t/trace.zip"},""" +
+        """{"feature":"features/home.saffron","scenario":"Home","status":"green"}],""" +
+        """"proposals":[{"feature":"features/cart.saffron","scenario":"Add","verified":true,"importable":true},""" +
+        """{"feature":"features/login.saffron","scenario":"Sign in","verified":true,"importable":false,"reason":"the scenario changed since the run"}],""" +
+        """"warnings":["this checkout is at def5678, the run tested abc1234"]}"""
+
+    private fun node(n: DefaultMutableTreeNode) = n.userObject as RunNode
+
+    fun `test a viewed CI run's results become rows`() {
+        val rows = viewRows(Gson().fromJson(viewed, RunView::class.java), null)
+        assertEquals(
+            listOf("this checkout is at def5678, the run tested abc1234", "1 failed · 1 healed · 10 passed", "<b>Sign in</b>", "Add", "2 proposals: 1 importable"),
+            rows.map { it.toString() },
+        )
+        assertEquals("14 AI calls · $0.42", node(rows[1]).detail)
+        // Red first: the failing step and the first line of the error only; the trace goes with the row.
+        assertEquals("When I click \"Log in\" · Timeout 30000ms", node(rows[2]).detail)
+        assertNotNull(node(rows[2]).scenario!!.trace)
+        assertFalse(node(rows[2]).tooltip!!, node(rows[2]).tooltip!!.contains("<b>"))
+        assertEquals("healed", node(rows[3]).detail)
+        assertTrue(node(rows[3]).tooltip!!.contains("the button moved"))
+        assertNull(node(rows[3]).scenario!!.trace)
+        val proposals = (0 until rows[4].childCount).map { rows[4].getChildAt(it) as DefaultMutableTreeNode }
+        assertEquals(listOf("cart.saffron › Add", "login.saffron › Sign in"), proposals.map { it.toString() })
+        assertEquals(listOf("importable", "not importable: the scenario changed since the run"), proposals.map { node(it).detail })
+    }
+
+    fun `test a viewed CI run without results, too large, refused or from an older runner says so in one row`() {
+        val none = viewRows(Gson().fromJson("""{"run":{"id":"7"},"bundle":null,"reasonKind":"none","reason":"the run uploaded no bundle","warnings":[]}""", RunView::class.java), null)
+        assertEquals(listOf("No results uploaded"), none.map { it.toString() })
+        assertEquals("the run uploaded no bundle", node(none[0]).detail)
+        val running = viewRows(Gson().fromJson("""{"bundle":null,"reasonKind":"running","reason":"the run is not finished"}""", RunView::class.java), null)
+        assertEquals("No results yet", running.single().toString())
+
+        val big = viewRows(Gson().fromJson("""{"error":"the results are 250.5 MB","kind":"too-large","sizeBytes":250500000}""", RunView::class.java), null, limitMb = 100)
+        assertEquals("This run's results are 251 MB", big.single().toString())
+        assertEquals("above the 100 MB download limit: double-click to download", node(big.single()).detail)
+        assertEquals(250_500_000L, node(big.single()).tooLarge)
+        assertEquals(1L, megabytes(1))
+        assertEquals(2L, megabytes(1_000_001))
+
+        val refused = viewRows(Gson().fromJson("""{"error":"the bundle is from another repository"}""", RunView::class.java), null)
+        assertEquals("Results unavailable", refused.single().toString())
+        assertEquals("the bundle is from another repository", node(refused.single()).detail)
+
+        val old = viewRows(null, "error: unknown option '--run'", "0.9.6")
+        assertEquals("Viewing results needs saffron-ai 0.9.7 or later", old.single().toString())
+        assertEquals("this project has 0.9.6. Update it: npm i -D saffron-ai@latest.", node(old.single()).detail)
+    }
+
+    fun `test CI Runs loads a selected run's results only while shown, and asks before a large download`() {
+        if (SystemInfo.isWindows) return
+        val base = Path.of(project.basePath!!)
+        val dir = Files.createTempDirectory("saffron-view")
+        val log = dir.resolve("report.log")
+        val results = dir.resolve("results.json")
+        Files.writeString(results, viewed)
+        System.setProperty("intellij.progress.task.ignoreHeadless", "true")
+        PropertiesComponent.getInstance().setValue(CI_MAX_DOWNLOAD_KEY, 2, 100)
+        TestDialogManager.setTestDialog(TestDialog.YES)
+        try {
+            val runs = """echo '{"provider":"github","runs":[{"id":"7","name":"e2e","number":"7","status":"completed","conclusion":"failure"}]}'"""
+            standInCases(
+                base,
+                "  runs) $runs ;;\n  report) echo \"\$*\" >> '$log'; case \"\$*\" in *'--max-download 6 '*) cat '$results' ;;" +
+                    " *) echo '{\"error\":\"too large\",\"kind\":\"too-large\",\"sizeBytes\":5000000}'; exit 2 ;; esac ;;",
+            )
+            var shown = false
+            val tab = CiRunsTab(project, testRootDisposable, visible = { shown })
+            val tree = UIUtil.findComponentOfType(tab, Tree::class.java)!!
+            PlatformTestUtil.waitWithEventsDispatching("never listed", { runRows(tab).map { it.toString() } == listOf("e2e #7") }, 60)
+            // Hidden: selecting a run loads nothing.
+            tree.selectionPath = TreePath(runRows(tab)[0].path)
+            val until = System.currentTimeMillis() + 1_000
+            PlatformTestUtil.waitWithEventsDispatching("", { System.currentTimeMillis() > until }, 10)
+            assertFalse(Files.exists(log))
+
+            shown = true
+            tree.clearSelection()
+            tree.selectionPath = TreePath(runRows(tab)[0].path)
+            fun children() = (0 until runRows(tab)[0].childCount).map { runRows(tab)[0].getChildAt(it).toString() }
+            PlatformTestUtil.waitWithEventsDispatching("the results never loaded", { children().contains("2 proposals: 1 importable") }, 60)
+            // Above the 2 MB setting: asked, then loaded again with a limit above the 5 MB.
+            assertEquals(
+                listOf("report --run 7 --provider github --max-download 2 --json", "report --run 7 --provider github --max-download 6 --json"),
+                Files.readAllLines(log),
+            )
+            // Cached: selecting it again runs nothing.
+            tree.clearSelection()
+            tree.selectionPath = TreePath(runRows(tab)[0].path)
+            PlatformTestUtil.dispatchAllEventsInIdeEventQueue()
+            assertEquals(2, Files.readAllLines(log).size)
+        } finally {
+            TestDialogManager.setTestDialog(TestDialog.DEFAULT)
+            PropertiesComponent.getInstance().unsetValue(CI_MAX_DOWNLOAD_KEY)
+            System.clearProperty("intellij.progress.task.ignoreHeadless")
+            base.resolve("node_modules").toFile().deleteRecursively()
+            dir.toFile().deleteRecursively()
+        }
+    }
+
+    fun `test CI Runs drops a run's results that arrive after another project is chosen`() {
+        if (SystemInfo.isWindows) return
+        val base = Path.of(project.basePath!!)
+        val a = base.resolve("a")
+        val b = base.resolve("b")
+        val service = SaffronStatusService.getInstance(project)
+        System.setProperty("intellij.progress.task.ignoreHeadless", "true")
+        try {
+            for (dir in listOf(a, b)) {
+                Files.createDirectories(dir)
+                Files.writeString(dir.resolve("saffron.config.json"), "{}")
+            }
+            val started = a.resolve("report.started")
+            fun runs(name: String) = """echo '{"provider":"github","runs":[{"id":"1","name":"$name","number":"1","status":"completed","conclusion":"failure"}]}'"""
+            // Same run id in both: a's late answer must not land under b's run.
+            standInCases(a, "  runs) ${runs("a")} ;;\n  report) touch '$started'; sleep 3; echo '{\"bundle\":null,\"reasonKind\":\"none\",\"reason\":\"from a\"}' ;;")
+            standInCases(b, "  runs) ${runs("b")} ;;\n  report) sleep 30 ;;")
+            service.choose(a)
+            val tab = CiRunsTab(project, testRootDisposable, visible = { true })
+            val tree = UIUtil.findComponentOfType(tab, Tree::class.java)!!
+            PlatformTestUtil.waitWithEventsDispatching("a never listed", { runRows(tab).map { it.toString() } == listOf("a #1") }, 60)
+            tree.selectionPath = TreePath(runRows(tab)[0].path)
+            PlatformTestUtil.waitWithEventsDispatching("a's report never started", { Files.exists(started) }, 30)
+            service.choose(b)
+            PlatformTestUtil.waitWithEventsDispatching("b never listed", { runRows(tab).map { it.toString() } == listOf("b #1") }, 60)
+            val until = System.currentTimeMillis() + 4_000
+            PlatformTestUtil.waitWithEventsDispatching("", { System.currentTimeMillis() > until }, 10)
+            assertEquals(0, runRows(tab)[0].childCount)
+        } finally {
+            System.clearProperty("intellij.progress.task.ignoreHeadless")
+            PropertiesComponent.getInstance(project).unsetValue("ai.saffron.jetbrains.root")
+            a.toFile().deleteRecursively()
+            b.toFile().deleteRecursively()
+            service.discoverRoots()
         }
     }
 

@@ -38,6 +38,10 @@
         <toolWindow id="Saffron" anchor="right" icon="ai.saffron.jetbrains.SaffronIcons.TOOL_WINDOW"
                     factoryClass="ai.saffron.jetbrains.ui.SaffronToolWindowFactory"/>
 
+        <!-- Settings → Tools → Saffron: the CI results download limit. -->
+        <applicationConfigurable parentId="tools" id="ai.saffron.jetbrains.settings" displayName="Saffron"
+                                 instance="ai.saffron.jetbrains.ui.SaffronSettings"/>
+
         <notificationGroup id="Saffron" displayType="BALLOON"/>
         <postStartupActivity implementation="ai.saffron.jetbrains.SaffronStartupActivity"/>
     </extensions>
