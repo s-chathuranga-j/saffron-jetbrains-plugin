@@ -204,12 +204,15 @@ internal fun viewRows(view: RunView?, problem: String?, version: String? = null,
     val rows = view.warnings.map { row(it, "", AllIcons.General.Warning, tooltipHtml(it)) }.toMutableList()
     view.totals?.let { t ->
         val cost = listOfNotNull(t.aiCalls?.let { "$it AI call${if (it == 1) "" else "s"}" }, t.costUsd?.let { "$" + "%.2f".format(it) }).joinToString(" · ")
-        rows += row("${t.red} failed · ${t.yellow} healed · ${t.green} passed", cost, AllIcons.General.Information)
+        rows += row("${t.red} failed · ${t.yellow} pending review · ${t.green} passed", cost, AllIcons.General.Information)
     }
     for (status in listOf("red", "yellow")) {
         for (s in view.scenarios.filter { it.status == status }) {
             val firstError = s.error?.lineSequence()?.firstOrNull { it.isNotBlank() }?.trim()
-            val detail = listOfNotNull(s.failingStep, firstError).joinToString(" · ").ifEmpty { if (status == "yellow") "healed" else "failed" }
+            // Yellow is healed, a first recording or a proposal not yet verified: all pending review.
+            val found = listOfNotNull(s.failingStep, firstError).ifEmpty { listOf(if (status == "yellow") "pending review" else "failed") }
+            val proof = when (s.verified) { true -> "verified"; false -> "unverified"; null -> null }
+            val detail = (found + listOfNotNull(proof)).joinToString(" · ")
             rows += row(
                 s.displayName ?: s.scenario,
                 detail,
@@ -234,6 +237,18 @@ internal fun viewRows(view: RunView?, problem: String?, version: String? = null,
     if (rows.isEmpty()) rows += row("No results in this run's bundle", "", AllIcons.General.Information)
     return rows
 }
+
+/**
+ * `<command> --run <id>` with the provider; `--max-download` only for `report`,
+ * which downloads: `saffron trace` in saffron-ai 0.9.7 rejects it, and replays what report kept.
+ */
+internal fun ciRunArgs(command: String, runId: String, provider: String?, limitMb: Long): List<String> =
+    listOf(command, "--run", runId) +
+        (provider?.let { listOf("--provider", it) } ?: emptyList()) +
+        (if (command == "report" && limitMb > 0) listOf("--max-download", limitMb.toString()) else emptyList())
+
+/** `feature:name` for `saffron trace`: the display name keeps an Examples row's "(example 1)" suffix. */
+internal fun ciTraceSelector(s: CiScenario): String = "${s.feature}:${s.displayName ?: s.scenario}"
 
 /** CI-controlled text as a Swing tooltip: control characters out, markup escaped, one line each. */
 internal fun tooltipHtml(vararg lines: String?): String? {
@@ -575,12 +590,8 @@ class CiRunsTab(
     private fun showing(): Boolean = visible?.invoke() ?: isShowing
 
     /** `report --run <id>` with the provider and the download limit, as [run]'s view and actions use it. */
-    private fun reportArgs(command: String, run: CiRun): List<String> {
-        val limit = allowed[run.id] ?: ciMaxDownloadMb().toLong()
-        return listOfNotNull(command, "--run", run.id) +
-            (listed?.provider?.let { listOf("--provider", it) } ?: emptyList()) +
-            (if (limit > 0) listOf("--max-download", limit.toString()) else emptyList())
-    }
+    private fun reportArgs(command: String, run: CiRun): List<String> =
+        ciRunArgs(command, run.id, listed?.provider, allowed[run.id] ?: ciMaxDownloadMb().toLong())
 
     /** The selected run's results, once per run and project, and only while the tab is on screen. */
     private fun viewSelected() {
@@ -673,12 +684,12 @@ class CiRunsTab(
         val run = runHere() ?: return
         val s = ((tree.lastSelectedPathComponent as? DefaultMutableTreeNode)?.userObject as? RunNode)?.scenario
         if (s?.trace == null) {
-            say(if (s == null) "Select a failed or healed scenario under the run." else "No trace for \"${s.scenario}\" in this run.")
+            say(if (s == null) "Select a failed or pending review scenario under the run." else "No trace for \"${s.scenario}\" in this run.")
             return
         }
         SaffronRunner.execute(project, "Saffron: CI replay") {
             it.command = "trace"
-            it.paths = "${s.feature}:${s.scenario}"
+            it.paths = ciTraceSelector(s)
             it.extraArgs = reportArgs("trace", run).drop(1).joinToString(" ")
         }
     }

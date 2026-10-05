@@ -450,7 +450,7 @@ class SaffronPluginTest : BasePlatformTestCase() {
     private val viewed = """{"run":{"provider":"github","id":"7","attempt":1},""" +
         """"bundle":{"folder":".saffron/ci/github-7/attempt-1","cached":false,"artifacts":[{"name":"saffron-bundle","sizeBytes":123}]},""" +
         """"totals":{"green":10,"yellow":1,"red":1,"aiCalls":14,"costUsd":0.42},""" +
-        """"scenarios":[{"feature":"features/cart.saffron","scenario":"Add","status":"yellow","narrative":"the button moved"},""" +
+        """"scenarios":[{"feature":"features/cart.saffron","scenario":"Add","status":"yellow","verified":false,"narrative":"the button moved"},""" +
         """{"feature":"features/login.saffron","scenario":"Sign in","displayName":"<b>Sign in</b>","status":"red","failingStep":"When I click \"Log in\"",""" +
         """"error":"Timeout 30000ms\n    at x","trace":".saffron/ci/github-7/attempt-1/artifacts/t/trace.zip"},""" +
         """{"feature":"features/home.saffron","scenario":"Home","status":"green"}],""" +
@@ -463,7 +463,7 @@ class SaffronPluginTest : BasePlatformTestCase() {
     fun `test a viewed CI run's results become rows`() {
         val rows = viewRows(Gson().fromJson(viewed, RunView::class.java), null)
         assertEquals(
-            listOf("this checkout is at def5678, the run tested abc1234", "1 failed · 1 healed · 10 passed", "<b>Sign in</b>", "Add", "2 proposals: 1 importable"),
+            listOf("this checkout is at def5678, the run tested abc1234", "1 failed · 1 pending review · 10 passed", "<b>Sign in</b>", "Add", "2 proposals: 1 importable"),
             rows.map { it.toString() },
         )
         assertEquals("14 AI calls · $0.42", node(rows[1]).detail)
@@ -471,12 +471,30 @@ class SaffronPluginTest : BasePlatformTestCase() {
         assertEquals("When I click \"Log in\" · Timeout 30000ms", node(rows[2]).detail)
         assertNotNull(node(rows[2]).scenario!!.trace)
         assertFalse(node(rows[2]).tooltip!!, node(rows[2]).tooltip!!.contains("<b>"))
-        assertEquals("healed", node(rows[3]).detail)
+        // Yellow is pending review, not "healed"; unverified says so, a red row with no verified field says nothing.
+        assertEquals("pending review · unverified", node(rows[3]).detail)
+        assertFalse(node(rows[2]).detail.contains("verified"))
         assertTrue(node(rows[3]).tooltip!!.contains("the button moved"))
         assertNull(node(rows[3]).scenario!!.trace)
         val proposals = (0 until rows[4].childCount).map { rows[4].getChildAt(it) as DefaultMutableTreeNode }
         assertEquals(listOf("cart.saffron › Add", "login.saffron › Sign in"), proposals.map { it.toString() })
         assertEquals(listOf("importable", "not importable: the scenario changed since the run"), proposals.map { node(it).detail })
+    }
+
+    fun `test a verified CI scenario says so`() {
+        val view = Gson().fromJson(viewed.replace(""""verified":false""", """"verified":true"""), RunView::class.java)
+        assertEquals("pending review · verified", node(viewRows(view, null)[3]).detail)
+    }
+
+    fun `test Open Trace names the example row and passes --max-download only to report`() {
+        val example = Gson().fromJson("""{"feature":"features/login.saffron","scenario":"Login","displayName":"Login (example 1)"}""", ai.saffron.jetbrains.ui.CiScenario::class.java)
+        assertEquals("features/login.saffron:Login (example 1)", ai.saffron.jetbrains.ui.ciTraceSelector(example))
+        val plain = Gson().fromJson("""{"feature":"features/login.saffron","scenario":"Login"}""", ai.saffron.jetbrains.ui.CiScenario::class.java)
+        assertEquals("features/login.saffron:Login", ai.saffron.jetbrains.ui.ciTraceSelector(plain))
+        // saffron trace in saffron-ai 0.9.7 rejects --max-download.
+        assertEquals(listOf("trace", "--run", "7", "--provider", "github"), ai.saffron.jetbrains.ui.ciRunArgs("trace", "7", "github", 100))
+        assertEquals(listOf("report", "--run", "7", "--provider", "github", "--max-download", "100"), ai.saffron.jetbrains.ui.ciRunArgs("report", "7", "github", 100))
+        assertEquals(listOf("report", "--run", "7"), ai.saffron.jetbrains.ui.ciRunArgs("report", "7", null, 0))
     }
 
     fun `test a viewed CI run without results, too large, refused or from an older runner says so in one row`() {

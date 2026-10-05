@@ -1,3 +1,9 @@
+<h3>0.6.1</h3>
+<ul>
+  <li><b>Open Trace works on a CI run with the default download limit.</b> It passed <code>--max-download</code> to <code>saffron trace</code>, which <code>saffron-ai</code> 0.9.7 rejects; only loading the results passes it now.</li>
+  <li><b>Open Trace finds a Scenario Outline's example row.</b> It named the scenario without its "(example 1)" suffix, which matched no trace; it now uses the name the run shows.</li>
+  <li><b>Yellow results read "pending review", not "healed".</b> Yellow also covers first recordings and proposals not yet verified. A scenario the run could not verify says "unverified", a verified one says "verified", and one the run does not report on says nothing.</li>
+</ul>
 <h3>0.6.0</h3>
 <ul>
   <li><b>CI Runs shows what a run found, without importing it.</b> Select a run and its results load under it: the totals, each failed and healed scenario with its failing step and first error line (the healing narrative in the tooltip), and "N proposals: M importable" with the reason for each one that is not. Loading is a background task you can cancel, runs only while the tab is on screen, and is kept per project until you choose another project or press Refresh. Needs <code>saffron-ai</code> 0.9.7 or later (<code>saffron report --run</code>); with an older runner the run says so.</li>
