@@ -166,6 +166,8 @@ class StatusAttention(
     val error: String? = null,
     val failedStep: String? = null,
     val evidence: List<StatusEvidence> = emptyList(),
+    /** The browser it ran in, from saffron-ai 0.9.9. */
+    val browser: String? = null,
 )
 
 class StatusLastRun(
@@ -175,6 +177,8 @@ class StatusLastRun(
     val reportHtml: String? = null,
     /** Null when the runner predates failure screenshots: absent, not empty. */
     val attention: List<StatusAttention>? = null,
+    /** Set when the run's rows span several browsers (a browser matrix): rows are labelled by browser then. */
+    val browsers: List<String>? = null,
 )
 
 /** [passRate]: the runner's, where a heal whose proof failed does not pass; null from a runner before 0.9.8. */

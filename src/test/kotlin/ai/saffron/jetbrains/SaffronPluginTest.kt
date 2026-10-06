@@ -486,6 +486,22 @@ class SaffronPluginTest : BasePlatformTestCase() {
         assertEquals("pending review · verified", node(viewRows(view, null)[3]).detail)
     }
 
+    fun `test a browser matrix row says its browser and its replay opens that browser alone`() {
+        val webkit = StatusAttention(feature = "features/a.saffron", scenario = "A", browser = "webkit")
+        assertEquals("A · webkit", ai.saffron.jetbrains.ui.attentionLabel(webkit, matrix = true))
+        assertEquals("A", ai.saffron.jetbrains.ui.attentionLabel(webkit, matrix = false))
+        assertEquals("features/a.saffron:A@webkit", ai.saffron.jetbrains.ui.attentionTraceSelector(webkit))
+        assertEquals("features/a.saffron:A", ai.saffron.jetbrains.ui.attentionTraceSelector(StatusAttention(feature = "features/a.saffron", scenario = "A")))
+        val ci = Gson().fromJson("""{"feature":"features/a.saffron","scenario":"A","displayName":"A","browser":"firefox"}""", ai.saffron.jetbrains.ui.CiScenario::class.java)
+        assertEquals("features/a.saffron:A@firefox", ai.saffron.jetbrains.ui.ciTraceSelector(ci))
+        val matrix = Gson().fromJson(
+            """{"bundle":{"folder":"f"},"browsers":["chromium","firefox"],"scenarios":[{"feature":"features/a.saffron","scenario":"A","status":"red","browser":"chromium"},{"feature":"features/a.saffron","scenario":"A","status":"red","browser":"firefox"}]}""",
+            RunView::class.java,
+        )
+        val labels = viewRows(matrix, null).map { node(it).label }
+        assertTrue(labels.toString(), labels.containsAll(listOf("A · chromium", "A · firefox")))
+    }
+
     fun `test Open Trace names the example row and passes --max-download only to report`() {
         val example = Gson().fromJson("""{"feature":"features/login.saffron","scenario":"Login","displayName":"Login (example 1)"}""", ai.saffron.jetbrains.ui.CiScenario::class.java)
         assertEquals("features/login.saffron:Login (example 1)", ai.saffron.jetbrains.ui.ciTraceSelector(example))

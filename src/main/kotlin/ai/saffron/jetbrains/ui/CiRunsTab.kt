@@ -84,6 +84,8 @@ class CiScenario(
     val error: String? = null,
     val narrative: String? = null,
     val trace: String? = null,
+    /** The browser it ran in, from saffron-ai 0.9.9. */
+    val browser: String? = null,
 )
 class CiViewProposal(val feature: String = "", val scenario: String = "", val verified: Boolean? = null, val importable: Boolean = false, val reason: String? = null)
 
@@ -100,6 +102,8 @@ class RunView(
     val reasonKind: String? = null,
     val reason: String? = null,
     val totals: CiTotals? = null,
+    /** Set when the run's rows span several browsers (a browser matrix): rows are labelled by browser then. */
+    val browsers: List<String>? = null,
     val scenarios: List<CiScenario> = emptyList(),
     val proposals: List<CiViewProposal> = emptyList(),
     val warnings: List<String> = emptyList(),
@@ -214,10 +218,10 @@ internal fun viewRows(view: RunView?, problem: String?, version: String? = null,
             val proof = when (s.verified) { true -> "verified"; false -> "unverified"; null -> null }
             val detail = (found + listOfNotNull(proof)).joinToString(" · ")
             rows += row(
-                s.displayName ?: s.scenario,
+                (s.displayName ?: s.scenario) + (if (view.browsers != null && s.browser != null) " · ${s.browser}" else ""),
                 detail,
                 if (status == "red") AllIcons.RunConfigurations.TestFailed else AllIcons.General.Warning,
-                tooltipHtml("${s.feature} › ${s.scenario}", s.failingStep, firstError, s.narrative, if (s.trace != null) "Double-click or Open Trace replays it." else null),
+                tooltipHtml("${s.feature} › ${s.scenario}" + (s.browser?.let { " ($it)" } ?: ""), s.failingStep, firstError, s.narrative, if (s.trace != null) "Double-click or Open Trace replays it." else null),
                 scenario = s,
             )
         }
@@ -248,8 +252,11 @@ internal fun ciRunArgs(command: String, runId: String, provider: String?, limitM
         (provider?.let { listOf("--provider", it) } ?: emptyList()) +
         (if (limitMb > 0 && (command == "report" || (command == "trace" && runnerAtLeast(version ?: "", 0, 9, 8)))) listOf("--max-download", limitMb.toString()) else emptyList())
 
-/** `feature:name` for `saffron trace`: the display name keeps an Examples row's "(example 1)" suffix. */
-internal fun ciTraceSelector(s: CiScenario): String = "${s.feature}:${s.displayName ?: s.scenario}"
+/**
+ * `feature:name` for `saffron trace`: the display name keeps an Examples row's "(example 1)"
+ * suffix, and `@browser` (saffron-ai 0.9.9 and later) picks one browser's execution of a matrix.
+ */
+internal fun ciTraceSelector(s: CiScenario): String = "${s.feature}:${s.displayName ?: s.scenario}" + (s.browser?.let { "@$it" } ?: "")
 
 /** CI-controlled text as a Swing tooltip: control characters out, markup escaped, one line each. */
 internal fun tooltipHtml(vararg lines: String?): String? {

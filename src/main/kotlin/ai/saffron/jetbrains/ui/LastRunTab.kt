@@ -32,6 +32,18 @@ internal class Screenshot(val file: VirtualFile? = null, val problem: String? = 
  * Disk work that takes long enough on a WSL path or a network share, with a
  * full-page picture, to freeze the IDE, so it is never run on the UI thread.
  */
+/** A browser matrix lists a scenario once per browser: the label says which. */
+internal fun attentionLabel(a: StatusAttention, matrix: Boolean): String =
+    if (matrix && a.browser != null) "${a.scenario} · ${a.browser}" else a.scenario
+
+/**
+ * `feature:scenario` for `saffron trace`, so two features with a scenario of the same name
+ * are told apart, and `@browser` when the row names one (saffron-ai 0.9.9 and later), so a
+ * browser matrix opens that browser's execution alone.
+ */
+internal fun attentionTraceSelector(a: StatusAttention): String =
+    "${a.feature}:${a.scenario}" + (a.browser?.let { "@$it" } ?: "")
+
 internal fun screenshotToShow(base: String, shot: StatusEvidence, scenario: String): Screenshot {
     val file = java.io.File(base, shot.file)
     if (!file.isFile) return Screenshot(problem = "The screenshot of \"$scenario\" is gone. Screenshots are kept for the latest run only.")
@@ -155,7 +167,7 @@ class LastRunTab(project: Project, parent: Disposable) : StatusTab(project, pare
                 parent.add(
                     DefaultMutableTreeNode(
                         RunRow(
-                            a.scenario,
+                            attentionLabel(a, run?.browsers != null),
                             a.failedStep ?: a.feature,
                             if (shot != null) AllIcons.FileTypes.Image else icon,
                             attentionTooltip(a, shot != null),
@@ -193,7 +205,7 @@ class LastRunTab(project: Project, parent: Disposable) : StatusTab(project, pare
             // name are told apart. Written as it is: it starts with the
             // feature path, never a quote, so the field takes it whole,
             // quotes and spacing in the name included.
-            it.paths = a?.let { s -> "${s.feature}:${s.scenario}" } ?: ""
+            it.paths = a?.let(::attentionTraceSelector) ?: ""
             // The run these rows list: the replay refuses a later one.
             it.extraArgs = shownRun?.let { run -> "--run $run" } ?: ""
         }
