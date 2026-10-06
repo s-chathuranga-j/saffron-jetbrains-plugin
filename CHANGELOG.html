@@ -1,5 +1,6 @@
 <h3>0.6.1</h3>
 <ul>
+  <li><b>Health's pass rate of recent runs is the runner's</b> (<code>saffron-ai</code> 0.9.8 or later): a heal whose proof failed does not pass, as on the Dashboard.</li>
   <li><b>Run one scenario from the editor.</b> With LSP4IJ installed, <b>▶ Run scenario</b>, <b>Replay only</b> and <b>Headed</b> above each scenario run it alone, by name, through a temporary run configuration made for it, which stays in the run widget. A saved configuration of that name is never changed, nothing from the Saffron template carries in, a scenario of the same name in another file, or another nested project, gets its own, and the lenses work while the IDE indexes. Needs <code>saffron-ai</code> 0.9.8 or later; with an older runner a click says so.</li>
   <li><b>Right-click Run inside a scenario</b> runs that scenario alone, with or without LSP4IJ, and never reuses a lens's Replay only or Headed configuration. Outside a scenario, or in a file in another Gherkin language, it runs the whole file as before.</li>
   <li><b>Open Trace works on a CI run with every runner, and keeps the download limit.</b> With <code>saffron-ai</code> 0.9.8 it passes <code>--max-download</code> to <code>saffron trace</code>, which downloads a run no longer on disk; with 0.9.7, which rejects the option, it leaves it out.</li>
