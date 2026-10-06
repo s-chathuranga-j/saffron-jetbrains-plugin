@@ -30,16 +30,23 @@ object SaffronScenarioRun {
      * The lens's configuration, through [SaffronRunner.prepare]: a temporary
      * one of that name is reused and reset, a saved one is the user's and is
      * left alone, and no field of the Saffron template carries in. A scenario
-     * of the same name in another file gets a name of its own: rewriting that
-     * one's configuration would change what its Run tab reruns.
+     * of the same name in another file, or in another nested project, gets a
+     * name of its own: rewriting that one's configuration would change what
+     * its Run tab reruns.
      */
     fun configuration(project: Project, root: String, target: String, scenario: String, mode: String): RunnerAndConfigurationSettings {
         val dir = FileUtil.toSystemIndependentName(root)
         val paths = SaffronCommand.joinPaths(listOf(target))
-        // The temporary configuration prepare would reuse, past a saved one of the name ("Saffron: <name>").
-        val taken = SaffronRunner.slot(project, name(scenario, mode)).second?.configuration as? SaffronRunConfiguration
-        val elsewhere = taken != null && (taken.paths != paths || taken.workingDirectory != dir)
-        return SaffronRunner.prepare(project, name(scenario, mode, target.substringBeforeLast(':').takeIf { elsewhere })) {
+        val file = target.substringBeforeLast(':')
+        // The file's path from the IDE project tells nested projects' files apart.
+        val inProject = project.basePath?.let { FileUtil.getRelativePath(FileUtil.toSystemIndependentName(it), "$dir/$file", '/') } ?: "$dir/$file"
+        // The first name whose configuration (the one prepare would reuse, past a saved
+        // one: "Saffron: <name>") is free or already this scenario's.
+        val label = listOf(null, file, inProject, "$dir/$file").map { name(scenario, mode, it) }.firstOrNull {
+            val taken = SaffronRunner.slot(project, it).second?.configuration as? SaffronRunConfiguration
+            taken == null || (taken.paths == paths && taken.workingDirectory == dir)
+        } ?: name(scenario, mode, "$dir/$file")
+        return SaffronRunner.prepare(project, label) {
             it.workingDirectory = dir
             it.paths = paths
             it.replayOnly = mode == "replay"

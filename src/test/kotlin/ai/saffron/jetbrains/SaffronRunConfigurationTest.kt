@@ -118,6 +118,16 @@ class SaffronRunConfigurationTest : BasePlatformTestCase() {
         } finally {
             runManager.getConfigurationSettingsList(SaffronConfigurationType.INSTANCE).forEach(runManager::removeConfiguration)
         }
+        // Three nested projects with the same file: each its own, and running one again reuses its own.
+        try {
+            val made = listOf("a", "b", "c").map { SaffronScenarioRun.configuration(project, "$root/apps/$it", "features/login.saffron:Login", "Login", "run") }
+            assertEquals(listOf("Run 'Login'", "Run 'Login' in features/login.saffron", "Run 'Login' in apps/c/features/login.saffron"), made.map { it.name })
+            assertEquals(listOf("$root/apps/a", "$root/apps/b", "$root/apps/c"), made.map { (it.configuration as SaffronRunConfiguration).workingDirectory })
+            assertSame(made[1], SaffronScenarioRun.configuration(project, "$root/apps/b", "features/login.saffron:Login", "Login", "run"))
+            assertEquals("$root/apps/b", (made[1].configuration as SaffronRunConfiguration).workingDirectory)
+        } finally {
+            runManager.getConfigurationSettingsList(SaffronConfigurationType.INSTANCE).forEach(runManager::removeConfiguration)
+        }
     }
 
     fun `test the scenario at a line is the one whose block holds it`() {
