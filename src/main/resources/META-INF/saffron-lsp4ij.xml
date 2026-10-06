@@ -21,6 +21,6 @@
         <action id="saffron.runScenario"
                 class="ai.saffron.jetbrains.SaffronRunScenarioAction"
                 text="Run Saffron Scenario"
-                description="Run the scenario under a Run lens: saffron run file:line"/>
+                description="Run the scenario under a Run lens: saffron run file:name"/>
     </actions>
 </idea-plugin>

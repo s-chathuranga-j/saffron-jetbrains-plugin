@@ -2,7 +2,6 @@ package ai.saffron.jetbrains.run
 
 import ai.saffron.jetbrains.ui.runnerAtLeast
 import com.google.gson.JsonParser
-import com.intellij.execution.RunManager
 import com.intellij.execution.RunnerAndConfigurationSettings
 import com.intellij.openapi.project.Project
 import com.intellij.openapi.util.io.FileUtil
@@ -37,8 +36,8 @@ object SaffronScenarioRun {
     fun configuration(project: Project, root: String, target: String, scenario: String, mode: String): RunnerAndConfigurationSettings {
         val dir = FileUtil.toSystemIndependentName(root)
         val paths = SaffronCommand.joinPaths(listOf(target))
-        val taken = RunManager.getInstance(project).findConfigurationByTypeAndName(SaffronConfigurationType.INSTANCE, name(scenario, mode))
-            ?.takeIf { it.isTemporary }?.configuration as? SaffronRunConfiguration
+        // The temporary configuration prepare would reuse, past a saved one of the name ("Saffron: <name>").
+        val taken = SaffronRunner.slot(project, name(scenario, mode)).second?.configuration as? SaffronRunConfiguration
         val elsewhere = taken != null && (taken.paths != paths || taken.workingDirectory != dir)
         return SaffronRunner.prepare(project, name(scenario, mode, target.substringBeforeLast(':').takeIf { elsewhere })) {
             it.workingDirectory = dir

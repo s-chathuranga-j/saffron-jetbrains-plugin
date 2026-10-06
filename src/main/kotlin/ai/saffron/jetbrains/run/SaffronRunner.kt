@@ -10,6 +10,21 @@ import com.intellij.openapi.project.Project
 /** Runs a Saffron configuration from anywhere in the plugin (tool window buttons). */
 object SaffronRunner {
 
+    /**
+     * The name [prepare] gives [name], past any saved configuration of it
+     * ("Saffron: <name>"), and the temporary configuration there it would reuse.
+     */
+    fun slot(project: Project, name: String): Pair<String, RunnerAndConfigurationSettings?> {
+        val runManager = RunManager.getInstance(project)
+        var label = name
+        var found = runManager.findConfigurationByTypeAndName(SaffronConfigurationType.INSTANCE, label)
+        while (found != null && !found.isTemporary) {
+            label = "Saffron: $label"
+            found = runManager.findConfigurationByTypeAndName(SaffronConfigurationType.INSTANCE, label)
+        }
+        return label to found
+    }
+
     fun execute(project: Project, name: String, configure: (SaffronRunConfiguration) -> Unit) {
         ProgramRunnerUtil.executeConfiguration(prepare(project, name, configure), DefaultRunExecutor.getRunExecutorInstance())
     }
@@ -24,12 +39,7 @@ object SaffronRunner {
     fun prepare(project: Project, name: String, configure: (SaffronRunConfiguration) -> Unit): RunnerAndConfigurationSettings {
         val runManager = RunManager.getInstance(project)
         val type = SaffronConfigurationType.INSTANCE
-        var label = name
-        var found = runManager.findConfigurationByTypeAndName(type, label)
-        while (found != null && !found.isTemporary) {
-            label = "Saffron: $label"
-            found = runManager.findConfigurationByTypeAndName(type, label)
-        }
+        val (label, found) = slot(project, name)
         val settings = found
             ?: runManager.createConfiguration(label, type.factory).also {
                 it.isTemporary = true

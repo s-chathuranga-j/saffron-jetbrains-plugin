@@ -77,6 +77,10 @@ class SaffronRunConfigurationTest : BasePlatformTestCase() {
         assertEquals("features/a.saffron:3", SaffronScenarioRun.target("features/a.saffron", "42", 3))
         assertEquals("features/a.saffron:3", SaffronScenarioRun.target("features/a.saffron", "10:30", 3))
         assertEquals("features/a.saffron:3", SaffronScenarioRun.target("features/a.saffron", "", 3))
+        // A name ending in a comma keeps it through the configuration's paths field.
+        val paths = SaffronCommand.joinPaths(listOf("features/x.saffron:Pay, then ship,"))
+        assertEquals(listOf("features/x.saffron:Pay, then ship,"), SaffronCommand.splitPaths(paths))
+        assertEquals(listOf("a.saffron", "b.saffron"), SaffronCommand.splitPaths("a.saffron, b.saffron"))
         assertEquals("features/a.saffron:10:30 sharp", SaffronScenarioRun.target("features/a.saffron", "10:30 sharp", 3))
     }
 
@@ -100,6 +104,17 @@ class SaffronRunConfigurationTest : BasePlatformTestCase() {
             // a's still runs a's scenario: its Run tab reruns what it ran.
             assertEquals(listOf("run", "features/a.saffron:Happy path"), SaffronCommand.arguments(a.configuration as SaffronRunConfiguration))
             assertSame(b, SaffronScenarioRun.configuration(project, root, "features/b.saffron:Happy path", "Happy path", "run"))
+        } finally {
+            runManager.getConfigurationSettingsList(SaffronConfigurationType.INSTANCE).forEach(runManager::removeConfiguration)
+        }
+        // With a saved "Run 'Login'", the lenses reuse "Saffron: Run 'Login'": a second file's gets its own there too.
+        val saved = runManager.createConfiguration("Run 'Login'", SaffronConfigurationType.INSTANCE.factory)
+        runManager.addConfiguration(saved)
+        try {
+            val a = SaffronScenarioRun.configuration(project, root, "features/a.saffron:Login", "Login", "run")
+            val b = SaffronScenarioRun.configuration(project, root, "features/b.saffron:Login", "Login", "run")
+            assertEquals(listOf("Saffron: Run 'Login'", "Run 'Login' in features/b.saffron"), listOf(a.name, b.name))
+            assertEquals(listOf("run", "features/a.saffron:Login"), SaffronCommand.arguments(a.configuration as SaffronRunConfiguration))
         } finally {
             runManager.getConfigurationSettingsList(SaffronConfigurationType.INSTANCE).forEach(runManager::removeConfiguration)
         }
@@ -189,7 +204,7 @@ class SaffronRunConfigurationTest : BasePlatformTestCase() {
         val lens = org.eclipse.lsp4j.Command(
             "Replay only",
             "saffron.runScenario",
-            listOf(com.google.gson.JsonParser.parseString("""{"root":"/p","target":"features/login.saffron:Successful login","line":12,"scenario":"Successful login","mode":"replay"}""")),
+            listOf(com.google.gson.JsonParser.parseString("""{"root":"/p","target":"features/login.saffron:Successful login","scenario":"Successful login","mode":"replay"}""")),
         )
         val make = com.redhat.devtools.lsp4ij.commands.LSPCommand::class.java
             .getDeclaredConstructor(org.eclipse.lsp4j.Command::class.java, ClassLoader::class.java)

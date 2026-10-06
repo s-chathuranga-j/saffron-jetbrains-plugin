@@ -103,12 +103,16 @@ object SaffronCommand {
      * Paths are typed as one field, so they are parsed the way a command line
      * is: whitespace separates, quotes keep `features/order checkout.saffron`
      * one path. A trailing comma on an entry is dropped, because "a, b" was
-     * the documented form before; a comma inside a name is part of the name.
+     * the documented form before; a comma inside a name is part of the name,
+     * and so is one ending a scenario's (`login.saffron:Pay, then ship,`).
      */
     fun splitPaths(paths: String): List<String> =
         ParametersListUtil.parse(paths.trim())
-            .map { it.trim().trimEnd(',') }
+            .map { it.trim().let { p -> if (SCENARIO_TARGET.containsMatchIn(p)) p else p.trimEnd(',') } }
             .filter { it.isNotEmpty() }
+
+    /** `file.saffron:12` or `file.feature:Name`: a scenario of a file, as `saffron run` takes it. */
+    private val SCENARIO_TARGET = Regex("\\.(saffron|feature):")
 
     /** The inverse: what the plugin writes when IT fills the field. */
     fun joinPaths(paths: List<String>): String = ParametersListUtil.join(paths)
