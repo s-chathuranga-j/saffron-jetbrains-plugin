@@ -177,7 +177,8 @@ class StatusLastRun(
     val attention: List<StatusAttention>? = null,
 )
 
-class StatusHistoryRun(val startedAt: String = "", val green: Int = 0, val yellow: Int = 0, val red: Int = 0, val aiCalls: Int = 0, val costUsd: Double? = null)
+/** [passRate]: the runner's, where a heal whose proof failed does not pass; null from a runner before 0.9.8. */
+class StatusHistoryRun(val startedAt: String = "", val green: Int = 0, val yellow: Int = 0, val red: Int = 0, val passRate: Int? = null, val aiCalls: Int = 0, val costUsd: Double? = null)
 
 class DuplicateWording(val steps: List<String> = emptyList(), val actions: String = "")
 

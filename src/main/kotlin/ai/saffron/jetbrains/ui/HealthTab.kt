@@ -102,7 +102,7 @@ class HealthTab(project: Project, parent: Disposable) : StatusTab(project, paren
 
         if (status.history.size > 1) {
             val recent = status.history.takeLast(10)
-            val rates = recent.map { r -> val n = r.green + r.yellow + r.red; if (n == 0) 0 else (r.green + r.yellow) * 100 / n }
+            val rates = recent.map { r -> r.passRate ?: run { val n = r.green + r.yellow + r.red; if (n == 0) 0 else (r.green + r.yellow) * 100 / n } }
             root.add(node(Row("Pass rate, last ${recent.size} runs", rates.joinToString(" · ") { "$it%" }, AllIcons.Actions.Profile, "See the Dashboard tab for the full trend.")))
         }
 
