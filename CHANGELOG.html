@@ -1,3 +1,8 @@
+<h3>0.7.0</h3>
+<ul>
+  <li><b>The selected CI run as one page, below the runs.</b> CI Runs shows the page viewing the run writes beside its report, the one VS Code shows too: the totals, each failed and pending-review scenario as a card with its screenshot (click it for the whole page), failing step, error and what the agent said, what passed, and the proposals. Its buttons open a scenario's trace or the scenario itself, the run's report and the run's page, and Import Run, after which the page loads again with what is importable now. Needs <code>saffron-ai</code> 0.10.0 or later; with an older runner the page says which one it needs, and the runs work as before.</li>
+  <li><b>A run says what it left to view</b> before you select it (GitHub): its results and their size, a summary only (<code>saffron export --report-only</code>), results expired, or no results.</li>
+</ul>
 <h3>0.6.2</h3>
 <ul>
   <li><b>Browser matrix rows say their browser</b> (<code>saffron-ai</code> 0.9.9 or later). After <code>saffron run --browser chromium,firefox,webkit</code>, the Last Run and CI Runs tabs list a scenario once per browser, labelled with it (<code>Checkout · firefox</code>), and the replay opens that browser's execution alone (<code>feature:scenario@browser</code>) instead of every browser's. With an older runner nothing changes.</li>

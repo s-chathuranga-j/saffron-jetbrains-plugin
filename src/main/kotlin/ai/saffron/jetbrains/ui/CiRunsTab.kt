@@ -33,6 +33,15 @@ import com.intellij.ui.treeStructure.Tree
 import java.awt.BorderLayout
 import java.nio.file.Path
 import java.time.Duration
+import com.intellij.ui.JBSplitter
+import com.intellij.ui.jcef.JBCefApp
+import com.intellij.ui.jcef.JBCefBrowser
+import com.intellij.ui.jcef.JBCefBrowserBase
+import com.intellij.ui.jcef.JBCefJSQuery
+import org.cef.browser.CefBrowser
+import org.cef.browser.CefFrame
+import org.cef.handler.CefRequestHandlerAdapter
+import org.cef.network.CefRequest
 import java.time.Instant
 import java.util.concurrent.ConcurrentHashMap
 import javax.swing.Icon
@@ -58,7 +67,34 @@ class CiRun(
     val attempt: Int? = null,
     /** Proposals pending here that came from this run. */
     val pending: Int = 0,
+    /** What the run left to view, from saffron-ai 0.10.0 (GitHub): its results, a summary only, expired or none. */
+    val results: CiResults? = null,
 )
+
+class CiResults(val kind: String = "", val sizeBytes: Long? = null, val label: String? = null)
+
+/** What a run left to view, in the runner's own words (`results.label`); a running run says so already. */
+internal fun resultsWords(results: CiResults?): String? = results?.takeIf { it.kind != "running" }?.label
+
+/**
+ * The runner's results page under a CSP (its own inline scripts and styles, embedded
+ * screenshots, the report's fonts; nothing else loads), with
+ * `saffronAct(action, feature, scenario, browser)` defined before its own script runs.
+ */
+internal fun withActions(html: String, actJs: String): String {
+    if (actJs.isEmpty()) return html
+    val csp = "<meta http-equiv=\"Content-Security-Policy\" content=\"default-src 'none'; script-src 'unsafe-inline'; " +
+        "style-src 'unsafe-inline' https://fonts.googleapis.com; font-src https://fonts.gstatic.com; img-src data:;\">"
+    val script = "<script>window.saffronAct = function (a, f, s, b) { $actJs };</script>"
+    val head = html.indexOf("</head>")
+    return if (head < 0) csp + script + html else html.substring(0, head) + csp + script + html.substring(head)
+}
+
+/** What the results page asked for, from its query payload (a JSON array): action, feature, scenario, browser. */
+internal fun parseAction(payload: String): List<String> {
+    val parts = runCatching { Gson().fromJson(payload, Array<String?>::class.java)?.toList() }.getOrNull() ?: emptyList()
+    return List(4) { parts.getOrNull(it) ?: "" }
+}
 
 class CiProblem(val kind: String = "failed", val message: String = "")
 
@@ -72,7 +108,7 @@ class CiRuns(
 )
 
 class CiArtifact(val name: String = "", val sizeBytes: Long = 0)
-class CiBundle(val folder: String = "", val cached: Boolean = false, val artifacts: List<CiArtifact> = emptyList())
+class CiBundle(val folder: String = "", val cached: Boolean = false, val artifacts: List<CiArtifact> = emptyList(), val summaryOnly: Boolean? = null)
 class CiTotals(val green: Int = 0, val yellow: Int = 0, val red: Int = 0, val aiCalls: Int? = null, val costUsd: Double? = null)
 class CiScenario(
     val feature: String = "",
@@ -107,6 +143,8 @@ class RunView(
     val scenarios: List<CiScenario> = emptyList(),
     val proposals: List<CiViewProposal> = emptyList(),
     val warnings: List<String> = emptyList(),
+    /** The run as one page, written beside its report (saffron-ai 0.10.0): what the results panel shows. */
+    val panelHtml: String? = null,
 )
 
 class ImportedOutcome(val file: String = "", val feature: String = "", val scenario: String = "", val outcome: String = "", val reason: String? = null)
@@ -343,6 +381,27 @@ class CiRunsTab(
     private var headFor: Path? = null
     private var headWatch: LocalFileSystem.WatchRequest? = null
 
+    // The selected run's results as one page (saffron-ai 0.10.0): `saffron report --run <id> --panel`,
+    // the page the VS Code extension shows too, below the runs. Its buttons call back through [actQuery].
+    // An IDE whose JCEF classes this plugin cannot load keeps the runs alone.
+    private val browser: JBCefBrowser? = try {
+        if (JBCefApp.isSupported()) JBCefBrowser() else null
+    } catch (e: LinkageError) {
+        null
+    } catch (e: Exception) {
+        // JCEF that is there but cannot start: the runs alone.
+        null
+    }
+    private val actQuery: JBCefJSQuery? = browser?.let { JBCefJSQuery.create(it as JBCefBrowserBase) }
+    /** Bumped per page asked for: a page for a run selected before is dropped. */
+    private var panelLoads = 0
+    /** The run whose page is on screen. */
+    private var panelFor: String? = null
+    /** Each run's page as rendered, with its results: cleared with them, the 10 latest kept (each holds its screenshots). */
+    private val pages = object : LinkedHashMap<String, String>() {
+        override fun removeEldestEntry(eldest: MutableMap.MutableEntry<String, String>?): Boolean = size > 10
+    }
+
     init {
         toolbar = toolbar(
             action("Import Run", "saffron import --run: the selected run's proposals, checked against this checkout, and its report, screenshots and traces", AllIcons.Actions.Download) { importSelected() },
@@ -351,6 +410,7 @@ class CiRunsTab(
             action("Open in Browser", "The selected run on GitHub or Azure DevOps", AllIcons.General.Web) { openSelected() },
             action("Refresh", "List the runs again (saffron runs) and load the selected run's results again", AllIcons.Actions.Refresh) {
                 views.clear()
+                pages.clear()
                 loadRuns()
             },
         )
@@ -360,6 +420,7 @@ class CiRunsTab(
                 ownNote = null
                 clearNote()
                 viewSelected()
+                showPanel(selectedRun())
             }
         }
         tree.addMouseListener(object : MouseAdapter() {
@@ -376,11 +437,29 @@ class CiRunsTab(
         addHierarchyListener { e ->
             if (e.changeFlags and HierarchyEvent.SHOWING_CHANGED.toLong() != 0L && showing()) viewSelected()
         }
+        browser?.let { b ->
+            Disposer.register(parent, b)
+            actQuery?.let { q ->
+                Disposer.register(b, q)
+                q.addHandler { payload ->
+                    val (action, feature, scenario, browserName) = parseAction(payload)
+                    ApplicationManager.getApplication().invokeLater({ onPageAction(action, feature, scenario, browserName) }, project.disposed)
+                    null
+                }
+            }
+            // The page links nowhere: anything that tries to load is stopped.
+            b.jbCefClient.addRequestHandler(object : CefRequestHandlerAdapter() {
+                override fun onBeforeBrowse(browser: CefBrowser?, frame: CefFrame?, request: CefRequest, userGesture: Boolean, isRedirect: Boolean): Boolean =
+                    !(request.url.startsWith("file:///jbcefbrowser/") || request.url.startsWith("about:"))
+            }, b.cefBrowser)
+            b.loadHTML(panelMessage("Select a run to see its results here."))
+        }
         // Run names and errors come from CI: never rendered as HTML.
         note.putClientProperty("html.disable", true)
+        val runs = JBScrollPane(tree)
         setContent(JPanel(BorderLayout()).apply {
             add(note, BorderLayout.NORTH)
-            add(JBScrollPane(tree), BorderLayout.CENTER)
+            add(browser?.let { b -> JBSplitter(true, 0.45f).apply { firstComponent = runs; secondComponent = b.component } } ?: runs, BorderLayout.CENTER)
         })
         Disposer.register(parent) {
             disposed = true
@@ -436,6 +515,7 @@ class CiRunsTab(
             listedFor = null
             imports.clear()
             views.clear()
+            pages.clear()
             allowed.clear()
             ownNote = null
             clearNote()
@@ -537,7 +617,7 @@ class CiRunsTab(
             val node = DefaultMutableTreeNode(
                 RunNode(
                     "${run.name} #${run.number}",
-                    listOfNotNull(outcome, ago(run.createdAt), if (waiting > 0) "$waiting proposal${if (waiting == 1) "" else "s"} pending here" else null).joinToString(" · "),
+                    listOfNotNull(outcome, ago(run.createdAt), if (waiting > 0) "$waiting proposal${if (waiting == 1) "" else "s"} pending here" else null, resultsWords(run.results)).joinToString(" · "),
                     icon,
                     tooltipHtml(
                         run.title,
@@ -644,6 +724,7 @@ class CiRunsTab(
                 views[run.id] = answer
                 rebuild()
                 expand(run)
+                if (selectedRun()?.id == run.id) showPanel(run, again = true)
                 val (view, _) = answer
                 if (view?.kind == "too-large" && view.sizeBytes != null && showing() && selectedRun()?.id == run.id) askDownload(run, view.sizeBytes)
             }
@@ -658,6 +739,7 @@ class CiRunsTab(
         if (!MessageDialogBuilder.yesNo("Download CI Results", "This run's results are $mb MB. Download?").yesText("Download").noText("Not Now").ask(project)) return
         allowed[run.id] = mb + 1
         views.remove(run.id)
+        pages.remove(run.id)
         view(base, run)
     }
 
@@ -755,12 +837,85 @@ class CiRunsTab(
                 val outcome = result ?: RunImport(error = problem)
                 imports[run.id] = outcome
                 say(summary(outcome, run))
+                // What is importable changed: the results and their page load again.
+                if (outcome.error == null) {
+                    views.remove(run.id)
+                    pages.remove(run.id)
+                    viewSelected()
+                }
                 rebuild()
                 expand(run)
                 // The proposals, the report and the evidence changed on disk.
                 refreshStatus()
             }
         }.queue()
+    }
+
+    /** The results page for [run], once its results are loaded; [again] reloads one already shown. */
+    private fun showPanel(run: CiRun?, again: Boolean = false) {
+        val b = browser ?: return
+        // Selecting inside the run on screen changes nothing, and never drops its refresh.
+        if (run != null && run.id == panelFor && !again) return
+        val load = ++panelLoads
+        // A message is no run's page: selecting a run again loads its own.
+        fun message(text: String) {
+            panelFor = null
+            b.loadHTML(panelMessage(text))
+        }
+        if (run == null) return message("Select a run to see its results here.")
+        val base = listedFor ?: return message("Select a run to see its results here.")
+        if (!trusted()) return message(SaffronStatusService.UNTRUSTED)
+        if (base != projectRoot) return message("Select a run of this project to see its results here.")
+        if (!again) pages[run.id]?.let { cached ->
+            panelFor = run.id
+            b.loadHTML(cached)
+            return
+        }
+        val loaded = views[run.id]
+        val view = loaded?.first
+        when {
+            loaded == null -> message(if (showing()) "Loading the results of ${run.name} #${run.number}…" else "The results load when this tab is on screen.")
+            view?.bundle == null -> message(view?.reason ?: view?.error ?: loaded.second ?: "This run has no Saffron results.")
+            else -> {
+                val js = actQuery?.inject("JSON.stringify([a, f || '', s || '', b || ''])") ?: ""
+                // The page the view wrote beside the run's report, read from the run's own folder only.
+                val cache = base.resolve(".saffron").resolve("ci").normalize()
+                val file = view.panelHtml?.let { base.resolve(it).normalize() }?.takeIf { it.startsWith(cache) }
+                ApplicationManager.getApplication().executeOnPooledThread {
+                    val page = file?.let { runCatching { java.nio.file.Files.readString(it) }.getOrNull() }?.let { withActions(it, js) }
+                    ApplicationManager.getApplication().invokeLater({
+                        if (load != panelLoads) return@invokeLater
+                        if (page == null) {
+                            message("The results panel needs saffron-ai 0.10.0 or later" + (latest?.version?.let { "; this project has $it" } ?: "") + ". Update it: npm i -D saffron-ai@latest.")
+                            return@invokeLater
+                        }
+                        // Only a real page is kept: a message is shown again, never cached.
+                        pages[run.id] = page
+                        panelFor = run.id
+                        b.loadHTML(page)
+                    }, project.disposed)
+                }
+            }
+        }
+    }
+
+    /** A button on the results page: what the toolbar does, for the run on screen. */
+    private fun onPageAction(action: String, feature: String, scenario: String, browserName: String) {
+        val run = selectedRun() ?: return
+        if (run.id != panelFor) return
+        when (action) {
+            "trace" -> if (feature.isNotEmpty() && scenario.isNotEmpty()) {
+                SaffronRunner.execute(project, "Saffron: CI replay") {
+                    it.command = "trace"
+                    it.paths = ciTraceSelector(CiScenario(feature = feature, scenario = scenario, displayName = scenario, browser = browserName.ifEmpty { null }))
+                    it.extraArgs = reportArgs("trace", run).drop(1).joinToString(" ")
+                }
+            }
+            "open" -> if (feature.isNotEmpty()) openScenario(latest?.features ?: emptyList(), feature, scenario)
+            "report" -> openReport()
+            "import" -> importSelected()
+            "run" -> openSelected()
+        }
     }
 
     private fun summary(result: RunImport, run: CiRun): String {
@@ -775,3 +930,8 @@ class CiRunsTab(
         ).joinToString(", ") + "."
     }
 }
+
+/** A page in the results' own colours, for the moments there is no page to show. */
+private fun panelMessage(text: String) =
+    "<html><body style=\"margin:0;padding:24px;background:#131416;color:#7E8388;font:13px system-ui,sans-serif\">" +
+        StringUtil.escapeXmlEntities(text) + "</body></html>"

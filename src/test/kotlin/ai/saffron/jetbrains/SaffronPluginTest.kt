@@ -571,7 +571,7 @@ class SaffronPluginTest : BasePlatformTestCase() {
             tree.selectionPath = TreePath(runRows(tab)[0].path)
             fun children() = (0 until runRows(tab)[0].childCount).map { runRows(tab)[0].getChildAt(it).toString() }
             PlatformTestUtil.waitWithEventsDispatching("the results never loaded", { children().contains("2 proposals: 1 importable") }, 60)
-            // Above the 2 MB setting: asked, then loaded again with a limit above the 5 MB.
+            // Above the 2 MB setting: asked, then loaded again with a limit above the 5 MB. Its page is a file the view wrote: no third call.
             assertEquals(
                 listOf("report --run 7 --provider github --max-download 2 --json", "report --run 7 --provider github --max-download 6 --json"),
                 Files.readAllLines(log),
@@ -835,5 +835,27 @@ class SaffronPluginTest : BasePlatformTestCase() {
         val html = ai.saffron.jetbrains.ui.withOpener(page, "open(f, s)")
         assertTrue(html.indexOf("window.saffronOpen") in 0 until html.indexOf("</head>"))
         assertEquals(page, ai.saffron.jetbrains.ui.withOpener(page, ""))
+    }
+
+    fun `test a run row says what it left to view, from saffron runs --json`() {
+        val listed = Gson().fromJson(
+            """{"provider":"github","runs":[{"id":"1","results":{"kind":"full","sizeBytes":3145728,"label":"results, 3 MB"}},{"id":"2","results":{"kind":"summary","sizeBytes":10,"label":"summary only, under 1 MB"}},{"id":"3","results":{"kind":"expired","label":"results expired"}},{"id":"4","results":{"kind":"running","label":"still running"}},{"id":"5"}]}""",
+            ai.saffron.jetbrains.ui.CiRuns::class.java,
+        )
+        assertEquals(
+            listOf("results, 3 MB", "summary only, under 1 MB", "results expired", null, null),
+            listed.runs.map { ai.saffron.jetbrains.ui.resultsWords(it.results) },
+        )
+    }
+
+    fun `test the results page defines saffronAct before its own script, and its payload reads back whole`() {
+        val page = "<html><head></head><body><script>use()</script></body></html>"
+        val html = ai.saffron.jetbrains.ui.withActions(page, "act(a, f, s, b)")
+        assertTrue(html.indexOf("window.saffronAct") in 0 until html.indexOf("</head>"))
+        assertEquals(page, ai.saffron.jetbrains.ui.withActions(page, ""))
+        assertTrue(html.indexOf("Content-Security-Policy") in 0 until html.indexOf("window.saffronAct"))
+        assertEquals(listOf("trace", "features/a.saffron", "Sign in\nwith a newline", "firefox"), ai.saffron.jetbrains.ui.parseAction("[\"trace\",\"features/a.saffron\",\"Sign in\\nwith a newline\",\"firefox\"]"))
+        assertEquals(listOf("import", "", "", ""), ai.saffron.jetbrains.ui.parseAction("[\"import\"]"))
+        assertEquals(listOf("", "", "", ""), ai.saffron.jetbrains.ui.parseAction("not json"))
     }
 }
