@@ -63,6 +63,8 @@ class SaffronPanel(private val project: Project, parent: Disposable) : SimpleToo
     /** Pending review from the status: listed proposals plus unreadable ones; null until it loads. */
     private var pendingFromStatus: Int? = null
     private var scannedRoot: java.nio.file.Path? = null
+    /** The root the files on screen were scanned for. */
+    private var shownRoot: java.nio.file.Path? = null
     /** Bumped by every scan: only the latest one, for the current root, may publish. */
     private val scanGeneration = java.util.concurrent.atomic.AtomicInteger()
     private val service = SaffronStatusService.getInstance(project)
@@ -159,6 +161,11 @@ class SaffronPanel(private val project: Project, parent: Disposable) : SimpleToo
     }
 
     private fun runSelected() {
+        // Files scanned for another project would resolve against this one's root.
+        if (shownRoot != service.root) {
+            hint.text = "Still loading this project's files: try again in a moment."
+            return
+        }
         val selected = all.filter { list.isItemSelected(it) }
         if (selected.isEmpty()) {
             hint.text = "Tick one or more files first, or use Run All."
@@ -197,6 +204,13 @@ class SaffronPanel(private val project: Project, parent: Disposable) : SimpleToo
 
     private fun scan() {
         val root = service.root
+        if (root != scannedRoot) {
+            // Another project chosen: drop the last one's files and ticks until its scan lands.
+            state = null
+            all = emptyList()
+            shownRoot = null
+            list.clear()
+        }
         scannedRoot = root
         val generation = scanGeneration.incrementAndGet()
         ApplicationManager.getApplication().executeOnPooledThread {
@@ -204,7 +218,10 @@ class SaffronPanel(private val project: Project, parent: Disposable) : SimpleToo
             // A slower scan of the project chosen before must not replace the
             // current one's files: runs resolve them against the current root.
             ApplicationManager.getApplication().invokeLater({
-                if (generation == scanGeneration.get() && root == service.root) show(scanned)
+                if (generation == scanGeneration.get() && root == service.root) {
+                    shownRoot = root
+                    show(scanned)
+                }
             }, project.disposed)
         }
     }

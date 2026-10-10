@@ -62,10 +62,7 @@ object SaffronCommand {
             // The execution replay: the field holds one scenario name (or
             // feature:scenario). Blank opens every traced scenario, starting
             // on a failed one.
-            "trace" -> {
-                args += "trace"
-                traceName(c.paths)?.let { args += it }
-            }
+            "trace" -> args += "trace"
             // Listing is the safe default; the tool window adds --yes through
             // extra arguments after asking.
             "prune" -> args += "prune"
@@ -90,6 +87,8 @@ object SaffronCommand {
             }
         }
         if (c.extraArgs.isNotBlank()) args += ParametersListUtil.parse(c.extraArgs.trim())
+        // The name last, after `--`: a CI scenario named "--port 1" is a name, never an option.
+        if (c.command == "trace") traceName(c.paths)?.let { args += listOf("--", it) }
         return args
     }
 

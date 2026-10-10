@@ -1,6 +1,7 @@
 package ai.saffron.jetbrains.run
 
 import ai.saffron.jetbrains.ui.FEATURE_EXTENSIONS
+import ai.saffron.jetbrains.ui.SaffronProjectScan
 import ai.saffron.jetbrains.ui.SaffronRoots
 import ai.saffron.jetbrains.ui.SaffronStatusService
 import com.intellij.execution.actions.ConfigurationContext
@@ -56,8 +57,8 @@ class SaffronRunConfigurationProducer : LazyRunConfigurationProducer<SaffronRunC
 
     /**
      * The file or folder to run and the Saffron project it belongs to; null
-     * outside a Saffron project (Cucumber-JVM, SpecFlow and Behat have
-     * .feature files too), and for a folder holding other Saffron projects.
+     * outside a Saffron project or its test folder (Cucumber-JVM, SpecFlow and Behat
+     * have .feature files too), and for a folder holding other Saffron projects.
      */
     private fun target(context: ConfigurationContext): Pair<VirtualFile, String>? {
         val file = context.location?.virtualFile ?: return null
@@ -68,6 +69,8 @@ class SaffronRunConfigurationProducer : LazyRunConfigurationProducer<SaffronRunC
         // rootFor starts at the parent, so a folder is given as a child of itself.
         val root = SaffronRoots.rootFor(if (file.isDirectory) path.resolve("_") else path, Path.of(base))
         if (!Files.exists(root.resolve("saffron.config.json")) && root !in roots) return null
+        // The project itself, or what is in its test folder: Cucumber files elsewhere are not Saffron's.
+        if (path.normalize() != root.toAbsolutePath().normalize() && !SaffronProjectScan.inFeaturesDir(root, path)) return null
         if (file.isDirectory && (roots.any { it != root && it.startsWith(path) } || !containsSaffronFiles(file))) return null
         return file to FileUtil.toSystemIndependentName(root.toString())
     }

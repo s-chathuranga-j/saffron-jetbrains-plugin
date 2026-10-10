@@ -1,9 +1,14 @@
 <h3>0.7.0</h3>
 <ul>
-  <li><b>The selected CI run as one page, below the runs.</b> CI Runs shows the page viewing the run writes beside its report, the one VS Code shows too: the totals, each failed and pending-review scenario as a card with its screenshot (click it for the whole page), failing step, error and what the agent said, what passed, and the proposals. Its buttons open a scenario's trace or the scenario itself, the run's report and the run's page, and Import Run, after which the page loads again with what is importable now. Needs <code>saffron-ai</code> 0.10.0 or later; with an older runner the page says which one it needs, and the runs work as before.</li>
+  <li><b>The selected CI run as one page, below the runs.</b> CI Runs shows the page viewing the run writes beside its report, the one VS Code shows too: the totals, each failed and pending-review scenario as a card with its screenshot (click it for the whole page), failing step, error and what the agent said, what passed, and the proposals. Its buttons open a scenario's trace or the scenario itself, the run's report and the run's page, and Import Run, after which the page loads again with what is importable now. Needs <code>saffron-ai</code> 0.10.0 or later; with an older runner the page says it arrives with 0.10.0 and which version the project has, and the runs work as before.</li>
   <li><b>A run says what it left to view</b> before you select it (GitHub): its results and their size, a summary only (<code>saffron export --report-only</code>), results expired, or no results.</li>
   <li>The Orphans tab says when the scan could not finish, and offers no Remove All, instead of reporting no orphaned recordings (<code>saffron-ai</code> 0.10.0).</li>
-  <li>A scan of a project selected before another one finishes no longer replaces the newly selected project's files.</li>
+  <li>A scan of a project selected before another one finishes no longer replaces the newly selected project's files, and switching projects clears the previous project's selection, so Run Selected never runs it against the new one.</li>
+  <li>The CI results page loads the run again when its cached page was cleared, instead of asking for an upgrade; a runner's structured CI answer (not signed in, CI tool missing) keeps its message, provider and branch.</li>
+  <li>An IDE whose built-in browser cannot start keeps the Saffron tool window: the Dashboard tab says so instead.</li>
+  <li><b>The Files tab and right-click Run keep to the project's test folder</b>: <code>features</code> in <code>saffron.config.json</code> (<code>features</code> by default; <code>"."</code> is the whole project, without <code>.saffron</code>, <code>node_modules</code>, <code>.git</code> and build folders). Cucumber or Behat <code>.feature</code> files elsewhere in the repository are no longer listed, run or recorded.</li>
+  <li>Open Trace passes the scenario after <code>--</code>, so a CI scenario or feature whose name starts with <code>--</code> is a name, never an option of <code>saffron trace</code>.</li>
+  <li>A CI run or proposal whose provider reports no price shows its AI calls without a "$0.00", as VS Code does.</li>
   <li>Step completion in the middle of a line, or before its <code>As "..."</code>, never duplicates or drops text (through the runner's language server).</li>
 </ul>
 <h3>0.6.2</h3>

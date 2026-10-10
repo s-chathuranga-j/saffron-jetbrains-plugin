@@ -34,6 +34,9 @@ class DashboardTab(project: Project, parent: Disposable) : StatusTab(project, pa
         if (JBCefApp.isSupported()) JBCefBrowser() else null
     } catch (e: LinkageError) {
         null
+    } catch (e: Exception) {
+        // JCEF that is there but cannot start: the message too.
+        null
     }
     private val openQuery: JBCefJSQuery? = browser?.let { JBCefJSQuery.create(it as JBCefBrowserBase) }
     private val placeholder = JBLabel("This IDE build has no embedded browser. Run `saffron dashboard` to open the dashboard in a browser.", JBLabel.CENTER)

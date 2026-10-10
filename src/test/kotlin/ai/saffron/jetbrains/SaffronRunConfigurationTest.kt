@@ -290,30 +290,33 @@ class SaffronRunConfigurationTest : BasePlatformTestCase() {
         assertEquals(listOf("trace"), SaffronCommand.arguments(c))
         // Quoted, as the tooltip says for a value with a space: the quotes are not sent along.
         c.paths = "\"features/a.saffron:Buy shoes\""
-        assertEquals(listOf("trace", "features/a.saffron:Buy shoes"), SaffronCommand.arguments(c))
+        assertEquals(listOf("trace", "--", "features/a.saffron:Buy shoes"), SaffronCommand.arguments(c))
         // Unquoted, as people type anyway: still one name.
         c.paths = "features/a.saffron:Buy shoes"
-        assertEquals(listOf("trace", "features/a.saffron:Buy shoes"), SaffronCommand.arguments(c))
+        assertEquals(listOf("trace", "--", "features/a.saffron:Buy shoes"), SaffronCommand.arguments(c))
         c.paths = "\"\""
         assertEquals(listOf("trace"), SaffronCommand.arguments(c))
         // Pasted as the runner lists it: the quotes in the name are the name's.
         val name = "features/a.saffron:Search for \"red  shoes\""
         c.paths = name
-        assertEquals(listOf("trace", name), SaffronCommand.arguments(c))
+        assertEquals(listOf("trace", "--", name), SaffronCommand.arguments(c))
         c.paths = "Say \"hi\""
-        assertEquals(listOf("trace", "Say \"hi\""), SaffronCommand.arguments(c))
+        assertEquals(listOf("trace", "--", "Say \"hi\""), SaffronCommand.arguments(c))
         // Wrapped whole, with the inner quotes escaped: unquoted once.
         c.paths = SaffronCommand.joinPaths(listOf(name))
-        assertEquals(listOf("trace", name), SaffronCommand.arguments(c))
+        assertEquals(listOf("trace", "--", name), SaffronCommand.arguments(c))
         // What Open Replay writes, feature:scenario as it is, arrives as it is.
         for (written in listOf(name, "features/a.saffron:Say\"hi\"", "features/my checkout.saffron:Buy shoes")) {
             c.paths = written
-            assertEquals(listOf("trace", written), SaffronCommand.arguments(c))
+            assertEquals(listOf("trace", "--", written), SaffronCommand.arguments(c))
         }
         // The run-only fields stay out of it.
         c.paths = name
         c.tags = "@smoke"; c.replayOnly = true; c.headed = true
-        assertEquals(listOf("trace", name), SaffronCommand.arguments(c))
+        assertEquals(listOf("trace", "--", name), SaffronCommand.arguments(c))
+        // A CI name that reads as an option stays a name, after the run's own options.
+        c.paths = "--port 1"; c.extraArgs = "--run 7 --provider github"
+        assertEquals(listOf("trace", "--run", "7", "--provider", "github", "--", "--port 1"), SaffronCommand.arguments(c))
     }
 
     fun `test an unknown command is told every command there is`() {
@@ -502,6 +505,39 @@ class SaffronRunConfigurationTest : BasePlatformTestCase() {
         assertEquals(1, state.pendingProposals)
         assertTrue(state.packageInstalled)
         assertTrue(state.hasReport)
+    }
+
+    fun `test the scan and right-click Run keep to the configured test folder`() {
+        val base = Path.of(project.basePath!!)
+        try {
+            Files.createDirectories(base.resolve("e2e/node_modules/x"))
+            Files.createDirectories(base.resolve("features"))
+            Files.createDirectories(base.resolve("src/test"))
+            Files.writeString(base.resolve("saffron.config.json"), """{"features":"e2e"}""")
+            Files.writeString(base.resolve("e2e/login.saffron"), "Feature: L\n\nScenario: A\n  Given x\n")
+            Files.writeString(base.resolve("e2e/node_modules/x/dep.feature"), "Feature: D\n\nScenario: A\n  Given x\n")
+            Files.writeString(base.resolve("features/old.feature"), "Feature: O\n\nScenario: A\n  Given x\n")
+            Files.writeString(base.resolve("src/test/cart.feature"), "Feature: C\n\nScenario: A\n  Given x\n")
+            SaffronStatusService.getInstance(project).discoverRoots()
+            assertEquals(listOf("e2e/login.saffron"), SaffronProjectScan.scan(base.toString()).files.map { it.relativePath })
+            assertEquals("e2e/login.saffron", offered(base.resolve("e2e/login.saffron")).single().paths)
+            assertEmpty(offered(base.resolve("features/old.feature")))
+            assertEmpty(offered(base.resolve("src/test/cart.feature")))
+            assertEmpty(offered(base.resolve("src")))
+            assertEquals("", offered(base).single().paths)
+            // "." is the whole project, still without its dependencies or .saffron.
+            Files.writeString(base.resolve("saffron.config.json"), """{"features":"."}""")
+            assertEquals(
+                listOf("e2e/login.saffron", "features/old.feature", "src/test/cart.feature"),
+                SaffronProjectScan.scan(base.toString()).files.map { it.relativePath },
+            )
+            assertEquals("src/test/cart.feature", offered(base.resolve("src/test/cart.feature")).single().paths)
+            assertEmpty(offered(base.resolve("e2e/node_modules/x/dep.feature")))
+        } finally {
+            Files.deleteIfExists(base.resolve("saffron.config.json"))
+            listOf("e2e", "features", "src").forEach { base.resolve(it).toFile().deleteRecursively() }
+            SaffronStatusService.getInstance(project).discoverRoots()
+        }
     }
 
     /** What `saffron status --json` prints in 0.9.2: no cost from an unpriced provider, unreadable proposals, cache states, data. */

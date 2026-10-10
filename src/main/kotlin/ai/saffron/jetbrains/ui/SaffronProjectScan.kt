@@ -48,14 +48,35 @@ object SaffronProjectScan {
         return Files.isDirectory(features) && Files.list(features).use { s -> s.anyMatch { it.extension == "saffron" } }
     }
 
+    /**
+     * The configured test folder: `features` in saffron.config.json, else the runner's "features";
+     * relative to [base] or absolute, as `saffron status` reports featuresDir. "." is [base] itself.
+     */
+    fun featuresDir(base: Path): Path {
+        val configured = runCatching {
+            JsonParser.parseString(Files.readString(base.resolve("saffron.config.json"))).asJsonObject.get("features")
+                ?.takeIf { it.isJsonPrimitive && it.asJsonPrimitive.isString }?.asString
+        }.getOrNull() ?: "features"
+        return base.toAbsolutePath().resolve(configured).normalize()
+    }
+
+    /** Whether [path] is in the test folder of the project at [base], and not under .saffron, node_modules, .git or a build folder. */
+    fun inFeaturesDir(base: Path, path: Path): Boolean {
+        val dir = featuresDir(base)
+        val p = path.toAbsolutePath().normalize()
+        return p.startsWith(dir) && dir.relativize(p).none { it.name in SKIP_DIRS }
+    }
+
     fun scan(basePath: String): SaffronProjectState {
-        val base = Path.of(basePath)
+        val base = Path.of(basePath).toAbsolutePath().normalize()
         val files = mutableListOf<SaffronFile>()
-        Files.walkFileTree(base, object : java.nio.file.SimpleFileVisitor<Path>() {
+        // The runner's test folder only: .feature files elsewhere are another tool's (Cucumber, Behat).
+        val features = featuresDir(base)
+        if (Files.isDirectory(features)) Files.walkFileTree(features, object : java.nio.file.SimpleFileVisitor<Path>() {
             override fun preVisitDirectory(dir: Path, attrs: java.nio.file.attribute.BasicFileAttributes): java.nio.file.FileVisitResult =
                 // A folder with its own config is a nested project: its files are its own.
-                if (dir != base && (dir.name in SKIP_DIRS || Files.exists(dir.resolve("saffron.config.json")))) java.nio.file.FileVisitResult.SKIP_SUBTREE
-                else if (base.relativize(dir).nameCount > 12) java.nio.file.FileVisitResult.SKIP_SUBTREE
+                if (dir != features && (dir.name in SKIP_DIRS || Files.exists(dir.resolve("saffron.config.json")))) java.nio.file.FileVisitResult.SKIP_SUBTREE
+                else if (features.relativize(dir).nameCount > 12) java.nio.file.FileVisitResult.SKIP_SUBTREE
                 else java.nio.file.FileVisitResult.CONTINUE
 
             override fun visitFile(file: Path, attrs: java.nio.file.attribute.BasicFileAttributes): java.nio.file.FileVisitResult {

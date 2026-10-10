@@ -109,6 +109,15 @@ class CiRuns(
     val error: String? = null,
 )
 
+/**
+ * What the runs list shows for a `saffron runs --json` answer: a structured {problem} (gh or az
+ * missing, signed out, not a repository) as it came, with its provider and branch; a bare {error},
+ * or no answer, as a failure. Never "No CI runs" for either.
+ */
+internal fun listedRuns(runs: CiRuns?, problem: String?): CiRuns =
+    runs?.takeIf { it.problem != null || it.error == null }
+        ?: CiRuns(problem = CiProblem("failed", runs?.error ?: problem ?: "saffron runs gave no answer"))
+
 class CiArtifact(val name: String = "", val sizeBytes: Long = 0)
 class CiBundle(val folder: String = "", val cached: Boolean = false, val artifacts: List<CiArtifact> = emptyList(), val summaryOnly: Boolean? = null)
 class CiTotals(val green: Int = 0, val yellow: Int = 0, val red: Int = 0, val aiCalls: Int? = null, val costUsd: Double? = null)
@@ -247,7 +256,7 @@ internal fun viewRows(view: RunView?, problem: String?, version: String? = null,
     }
     val rows = view.warnings.map { row(it, "", AllIcons.General.Warning, tooltipHtml(it)) }.toMutableList()
     view.totals?.let { t ->
-        val cost = listOfNotNull(t.aiCalls?.let { "$it AI call${if (it == 1) "" else "s"}" }, t.costUsd?.let { "$" + "%.2f".format(it) }).joinToString(" · ")
+        val cost = listOfNotNull(t.aiCalls?.let { "$it AI call${if (it == 1) "" else "s"}" }, t.costUsd?.takeIf { it > 0 }?.let { "$" + "%.2f".format(it) }).joinToString(" · ")
         rows += row("${t.red} failed · ${t.yellow} pending review · ${t.green} passed", cost, AllIcons.General.Information)
     }
     for (status in listOf("red", "yellow")) {
@@ -403,6 +412,8 @@ class CiRunsTab(
     private val pages = object : LinkedHashMap<String, String>() {
         override fun removeEldestEntry(eldest: MutableMap.MutableEntry<String, String>?): Boolean = size > 10
     }
+    /** Runs whose page could not be read and were loaded again: a second miss is reported, not retried. */
+    private val reloaded = mutableSetOf<String>()
 
     init {
         toolbar = toolbar(
@@ -549,9 +560,7 @@ class CiRunsTab(
                     loadRuns()
                     return@invokeLater
                 }
-                // A runner's {error} is shown as the reason, never as "No CI runs".
-                listed = runs?.takeIf { it.error == null }
-                    ?: CiRuns(problem = CiProblem("failed", runs?.error ?: problem ?: "saffron runs gave no answer"))
+                listed = listedRuns(runs, problem)
                 listedFor = base
                 rebuild()
                 viewSelected()
@@ -888,9 +897,25 @@ class CiRunsTab(
                     ApplicationManager.getApplication().invokeLater({
                         if (load != panelLoads) return@invokeLater
                         if (page == null) {
-                            message("The results panel needs saffron-ai 0.10.0 or later" + (latest?.version?.let { "; this project has $it" } ?: "") + ". Update it: npm i -D saffron-ai@latest.")
+                            // Only a runner that writes no page is too old.
+                            if (view.panelHtml == null) {
+                                message(panelNeedsRunner(latest?.version))
+                                return@invokeLater
+                            }
+                            // The runner's cache eviction removed the page since these results were kept:
+                            // forget them and load the run again, once.
+                            if (reloaded.add(run.id)) {
+                                views.remove(run.id)
+                                pages.remove(run.id)
+                                message("Loading the results of ${run.name} #${run.number}…")
+                                if (base == projectRoot && listedFor == base) view(base, run)
+                                return@invokeLater
+                            }
+                            reloaded.remove(run.id)
+                            message("The results page ${view.panelHtml} could not be read.")
                             return@invokeLater
                         }
+                        reloaded.remove(run.id)
                         // Only a real page is kept: a message is shown again, never cached.
                         pages[run.id] = page
                         panelFor = run.id
@@ -932,6 +957,13 @@ class CiRunsTab(
         ).joinToString(", ") + "."
     }
 }
+
+/**
+ * Why a runner shows no results page: it writes none before saffron-ai 0.10.0. Said from the
+ * project's own version, never "update to latest", which may not have 0.10.0 yet.
+ */
+internal fun panelNeedsRunner(version: String?): String =
+    "The results page arrives with saffron-ai 0.10.0" + (version?.takeIf { it.isNotBlank() }?.let { "; this project has $it" } ?: "") + "."
 
 /** A page in the results' own colours, for the moments there is no page to show. */
 private fun panelMessage(text: String) =

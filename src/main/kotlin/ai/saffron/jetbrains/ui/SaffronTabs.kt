@@ -267,7 +267,7 @@ class ProposalsTab(project: Project, parent: Disposable) : StatusTab(project, pa
             },
         ).append('\n')
         b.append("agent: ").append(p.aiCalls).append(" AI calls")
-        p.costUsd?.let { b.append(" · ≈ $").append("%.2f".format(it)).append(" at API rates") }
+        p.costUsd?.takeIf { it > 0 }?.let { b.append(" · ≈ $").append("%.2f".format(it)).append(" at API rates") }
         b.append("\n\n").append(p.narrative).append('\n')
         if (p.adaptations.isNotEmpty()) {
             b.append("\nAdaptations:\n")

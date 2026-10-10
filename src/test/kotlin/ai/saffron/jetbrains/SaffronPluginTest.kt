@@ -17,6 +17,8 @@ import ai.saffron.jetbrains.ui.runnerError
 import ai.saffron.jetbrains.ui.tooltipHtml
 import ai.saffron.jetbrains.ui.RunView
 import ai.saffron.jetbrains.ui.viewRows
+import ai.saffron.jetbrains.ui.CiRuns
+import ai.saffron.jetbrains.ui.listedRuns
 import ai.saffron.jetbrains.ui.megabytes
 import ai.saffron.jetbrains.ui.CI_MAX_DOWNLOAD_KEY
 import com.google.gson.Gson
@@ -460,6 +462,28 @@ class SaffronPluginTest : BasePlatformTestCase() {
         """"warnings":["this checkout is at def5678, the run tested abc1234"]}"""
 
     private fun node(n: DefaultMutableTreeNode) = n.userObject as RunNode
+
+    fun `test a runner with no results page is told the release that brings it, and an unpriced CI run shows no cost`() {
+        assertEquals("The results page arrives with saffron-ai 0.10.0; this project has 0.9.9.", ai.saffron.jetbrains.ui.panelNeedsRunner("0.9.9"))
+        assertEquals("The results page arrives with saffron-ai 0.10.0.", ai.saffron.jetbrains.ui.panelNeedsRunner(null))
+        fun totals(json: String) = (viewRows(Gson().fromJson("""{"bundle":{},"totals":$json}""", RunView::class.java), null)[0].userObject as RunNode).detail
+        assertEquals("3 AI calls", totals("""{"aiCalls":3,"costUsd":0}"""))
+        assertEquals("3 AI calls · $0.25", totals("""{"aiCalls":3,"costUsd":0.25}"""))
+    }
+
+    fun `test a runs answer keeps its structured problem and a bare error fails`() {
+        val signedOut = listedRuns(Gson().fromJson(
+            """{"provider":"github","branch":"main","runs":[],"problem":{"kind":"signed-out","message":"gh is not signed in"},"error":"gh is not signed in"}""",
+            CiRuns::class.java,
+        ), null)
+        assertEquals("signed-out", signedOut.problem?.kind)
+        assertEquals("github", signedOut.provider)
+        assertEquals("main", signedOut.branch)
+        val failed = listedRuns(Gson().fromJson("""{"error":"boom"}""", CiRuns::class.java), null)
+        assertEquals("failed", failed.problem?.kind)
+        assertEquals("boom", failed.problem?.message)
+        assertEquals("no answer", listedRuns(null, "no answer").problem?.message)
+    }
 
     fun `test a viewed CI run's results become rows`() {
         val rows = viewRows(Gson().fromJson(viewed, RunView::class.java), null)
