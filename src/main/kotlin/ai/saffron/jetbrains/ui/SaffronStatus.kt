@@ -223,7 +223,12 @@ class ProjectStatus(
     val vocabulary: StatusVocabulary = StatusVocabulary(),
     /** Null when the runner predates `saffron prune`: absent, not empty. */
     val orphans: List<StatusOrphan>? = null,
+    /** Absent from older runners; incomplete means [orphans] is empty because the scan stopped. */
+    val orphanScan: OrphanScan? = null,
 )
+
+/** Whether the orphan scan could read every owner, and what stopped it. */
+class OrphanScan(val complete: Boolean = true, val errors: List<String> = emptyList())
 
 /** Result of one load: the status, or why it is unavailable, and the project root it is for. */
 class StatusLoad(val status: ProjectStatus?, val error: String?, val root: Path? = null)

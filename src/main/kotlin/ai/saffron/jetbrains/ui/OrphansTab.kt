@@ -45,6 +45,7 @@ class OrphansTab(project: Project, parent: Disposable) : StatusTab(project, pare
     private val root = DefaultMutableTreeNode(OrphanRow("Saffron"))
     private val model = DefaultTreeModel(root)
     private var count = 0
+    private var unknown: String? = null
     private val tree = Tree(model).apply {
         isRootVisible = false
         showsRootHandles = true
@@ -78,6 +79,7 @@ class OrphansTab(project: Project, parent: Disposable) : StatusTab(project, pare
     override fun render(status: ProjectStatus?) {
         root.removeAllChildren()
         count = 0
+        unknown = null
         if (status == null) {
             model.reload()
             return
@@ -91,6 +93,16 @@ class OrphansTab(project: Project, parent: Disposable) : StatusTab(project, pare
             return
         }
         count = orphans.size
+        // The scan stops on any file it cannot read, inside the features
+        // folder or not: an empty list then says nothing about the project.
+        unknown = status.orphanScan?.takeIf { !it.complete }
+            ?.let { "Orphaned recordings not checked: ${it.errors.firstOrNull() ?: "the scan could not finish"}" }
+            ?: status.features.firstOrNull { it.error != null }?.let { "Unknown until ${it.path} parses" }
+        if (unknown != null) {
+            tree.emptyText.text = unknown!!
+            model.reload()
+            return
+        }
         tree.emptyText.text = "Every recording belongs to a scenario"
         for ((kind, label) in listOf("cache" to "Caches", "proposal" to "Pending proposals", "artifact" to "Screenshot folders")) {
             val group = orphans.filter { it.kind == kind }
@@ -141,6 +153,10 @@ class OrphansTab(project: Project, parent: Disposable) : StatusTab(project, pare
 
     /** Deleting recordings cannot be undone from here, so it is always asked. */
     private fun prune() {
+        if (unknown != null) {
+            note.text = unknown
+            return
+        }
         if (count == 0) {
             note.text = "Every recording belongs to a scenario. Nothing to prune."
             return

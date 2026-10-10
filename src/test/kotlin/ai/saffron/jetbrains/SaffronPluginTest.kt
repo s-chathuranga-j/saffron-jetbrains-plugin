@@ -1,5 +1,6 @@
 package ai.saffron.jetbrains
 
+import ai.saffron.jetbrains.ui.OrphansTab
 import ai.saffron.jetbrains.ui.CiRunsTab
 import ai.saffron.jetbrains.ui.LastRunTab
 import ai.saffron.jetbrains.ui.RunNode
@@ -702,6 +703,30 @@ class SaffronPluginTest : BasePlatformTestCase() {
     }
 
     /** A stand-in `saffron` in [dir] from a whole shell `case` body. */
+    fun `test Orphans reports unknown ownership until features parse and blocks removal`() {
+        if (SystemInfo.isWindows) return
+        val base = Path.of(project.basePath!!)
+        try {
+            standInCases(base, """  status) echo '{"packageInstalled":true,"features":[{"path":"features/broken.saffron","error":"Missing StepSet"}],"orphans":[]}' ;;""")
+            val tab = OrphansTab(project, testRootDisposable)
+            val tree = UIUtil.findComponentOfType(tab, Tree::class.java)!!
+            PlatformTestUtil.waitWithEventsDispatching("no unknown ownership message", { tree.emptyText.text == "Unknown until features/broken.saffron parses" }, 60)
+            val toolbar = UIUtil.findComponentOfType(tab.toolbar as JComponent, ActionToolbarImpl::class.java)!!
+            val remove = (toolbar.actionGroup as DefaultActionGroup).childActionsOrStubs.single { it.templateText == "Remove All" }
+            remove.actionPerformed(TestActionEvent.createTestEvent(remove))
+            val note = UIUtil.findComponentOfType(tab, com.intellij.ui.components.JBLabel::class.java)!!
+            assertEquals("Unknown until features/broken.saffron parses", note.text)
+            standInCases(base, """  status) echo '{"packageInstalled":true,"features":[],"orphans":[]}' ;;""")
+            val refresh = (toolbar.actionGroup as DefaultActionGroup).childActionsOrStubs.single { it.templateText == "Refresh" }
+            refresh.actionPerformed(TestActionEvent.createTestEvent(refresh))
+            PlatformTestUtil.waitWithEventsDispatching("still unknown after parsing succeeds", { tree.emptyText.text == "Every recording belongs to a scenario" }, 60)
+            // A broken feature outside the features folder: no feature errors, but the scan stopped.
+            standInCases(base, """  status) echo '{"packageInstalled":true,"features":[],"orphans":[],"orphanScan":{"complete":false,"errors":["e2e/wip.saffron: Missing StepSet"]}}' ;;""")
+            refresh.actionPerformed(TestActionEvent.createTestEvent(refresh))
+            PlatformTestUtil.waitWithEventsDispatching("an incomplete scan looked healthy", { tree.emptyText.text == "Orphaned recordings not checked: e2e/wip.saffron: Missing StepSet" }, 60)
+        } finally { Files.deleteIfExists(base.resolve("node_modules/.bin/saffron")) }
+    }
+
     private fun standInCases(dir: Path, cases: String) {
         val bin = dir.resolve("node_modules/.bin/saffron")
         Files.createDirectories(bin.parent)
@@ -849,11 +874,17 @@ class SaffronPluginTest : BasePlatformTestCase() {
     }
 
     fun `test the results page defines saffronAct before its own script, and its payload reads back whole`() {
-        val page = "<html><head></head><body><script>use()</script></body></html>"
+        val page = "<html><head><title>Run 9</title></head><body><script>use()</script></body></html>"
         val html = ai.saffron.jetbrains.ui.withActions(page, "act(a, f, s, b)")
         assertTrue(html.indexOf("window.saffronAct") in 0 until html.indexOf("</head>"))
-        assertEquals(page, ai.saffron.jetbrains.ui.withActions(page, ""))
         assertTrue(html.indexOf("Content-Security-Policy") in 0 until html.indexOf("window.saffronAct"))
+        // The policy comes first in the head, and holds with no actions wired too.
+        assertTrue(html.indexOf("Content-Security-Policy") < html.indexOf("<title>"))
+        val bare = ai.saffron.jetbrains.ui.withActions(page, "")
+        assertTrue(bare.contains("Content-Security-Policy") && !bare.contains("window.saffronAct"))
+        // Only the page's own scripts run: each carries the policy's nonce.
+        val nonce = Regex("'nonce-([0-9a-f]+)'").find(html)!!.groupValues[1]
+        assertEquals(html.split("<script").size - 1, html.split("<script nonce=\"$nonce\">").size - 1)
         assertEquals(listOf("trace", "features/a.saffron", "Sign in\nwith a newline", "firefox"), ai.saffron.jetbrains.ui.parseAction("[\"trace\",\"features/a.saffron\",\"Sign in\\nwith a newline\",\"firefox\"]"))
         assertEquals(listOf("import", "", "", ""), ai.saffron.jetbrains.ui.parseAction("[\"import\"]"))
         assertEquals(listOf("", "", "", ""), ai.saffron.jetbrains.ui.parseAction("not json"))

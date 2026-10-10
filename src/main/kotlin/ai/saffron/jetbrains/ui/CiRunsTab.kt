@@ -77,17 +77,19 @@ class CiResults(val kind: String = "", val sizeBytes: Long? = null, val label: S
 internal fun resultsWords(results: CiResults?): String? = results?.takeIf { it.kind != "running" }?.label
 
 /**
- * The runner's results page under a CSP (its own inline scripts and styles, embedded
- * screenshots, the report's fonts; nothing else loads), with
- * `saffronAct(action, feature, scenario, browser)` defined before its own script runs.
+ * The runner's results page under a CSP, first in its head (its own scripts, by a
+ * nonce; inline styles, embedded screenshots, the report's fonts; nothing else loads),
+ * with `saffronAct(action, feature, scenario, browser)` defined before its own script
+ * runs when [actJs] wires one. Any other script, however it got into the page, is refused.
  */
 internal fun withActions(html: String, actJs: String): String {
-    if (actJs.isEmpty()) return html
-    val csp = "<meta http-equiv=\"Content-Security-Policy\" content=\"default-src 'none'; script-src 'unsafe-inline'; " +
+    val nonce = java.util.UUID.randomUUID().toString().replace("-", "")
+    val csp = "<meta http-equiv=\"Content-Security-Policy\" content=\"default-src 'none'; script-src 'nonce-$nonce'; " +
         "style-src 'unsafe-inline' https://fonts.googleapis.com; font-src https://fonts.gstatic.com; img-src data:;\">"
-    val script = "<script>window.saffronAct = function (a, f, s, b) { $actJs };</script>"
-    val head = html.indexOf("</head>")
-    return if (head < 0) csp + script + html else html.substring(0, head) + csp + script + html.substring(head)
+    val script = if (actJs.isEmpty()) "" else "<script nonce=\"$nonce\">window.saffronAct = function (a, f, s, b) { $actJs };</script>"
+    val page = html.replace("<script>", "<script nonce=\"$nonce\">")
+    val head = page.indexOf("<head>")
+    return if (head < 0) csp + script + page else page.substring(0, head + 6) + csp + script + page.substring(head + 6)
 }
 
 /** What the results page asked for, from its query payload (a JSON array): action, feature, scenario, browser. */

@@ -63,6 +63,8 @@ class SaffronPanel(private val project: Project, parent: Disposable) : SimpleToo
     /** Pending review from the status: listed proposals plus unreadable ones; null until it loads. */
     private var pendingFromStatus: Int? = null
     private var scannedRoot: java.nio.file.Path? = null
+    /** Bumped by every scan: only the latest one, for the current root, may publish. */
+    private val scanGeneration = java.util.concurrent.atomic.AtomicInteger()
     private val service = SaffronStatusService.getInstance(project)
 
     init {
@@ -196,9 +198,14 @@ class SaffronPanel(private val project: Project, parent: Disposable) : SimpleToo
     private fun scan() {
         val root = service.root
         scannedRoot = root
+        val generation = scanGeneration.incrementAndGet()
         ApplicationManager.getApplication().executeOnPooledThread {
             val scanned = runCatching { SaffronProjectScan.scan(root.toString()) }.getOrNull() ?: return@executeOnPooledThread
-            ApplicationManager.getApplication().invokeLater({ show(scanned) }, project.disposed)
+            // A slower scan of the project chosen before must not replace the
+            // current one's files: runs resolve them against the current root.
+            ApplicationManager.getApplication().invokeLater({
+                if (generation == scanGeneration.get() && root == service.root) show(scanned)
+            }, project.disposed)
         }
     }
 
