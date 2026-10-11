@@ -422,6 +422,24 @@ class SaffronRunConfigurationTest : BasePlatformTestCase() {
         }
     }
 
+    fun `test right-click Run on a file in a test folder outside the project never runs it from that project`() {
+        val base = Path.of(project.basePath!!)
+        try {
+            Files.createDirectories(base.resolve("app"))
+            Files.writeString(base.resolve("app/saffron.config.json"), """{"features":"../shared"}""")
+            Files.createDirectories(base.resolve("shared"))
+            Files.writeString(base.resolve("shared/x.saffron"), "Feature: X\n\nScenario: A\n  Given x\n")
+            SaffronStatusService.getInstance(project).discoverRoots()
+            // The runner refuses a feature file outside its project: the nearest config decides, as before.
+            val app = FileUtil.toSystemIndependentName(base.resolve("app").toString())
+            assertTrue(offered(base.resolve("shared/x.saffron")).none { it.workingDirectory == app })
+            assertTrue(offered(base.resolve("shared")).none { it.workingDirectory == app })
+        } finally {
+            listOf("app", "shared").forEach { base.resolve(it).toFile().deleteRecursively() }
+            SaffronStatusService.getInstance(project).discoverRoots()
+        }
+    }
+
     fun `test right-click Run on the project root looks in its test folder, not build or target`() {
         val base = Path.of(project.basePath!!)
         try {

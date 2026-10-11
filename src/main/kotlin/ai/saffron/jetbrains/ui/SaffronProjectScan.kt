@@ -27,6 +27,8 @@ data class SaffronProjectState(
     val pendingProposals: Int,
     val packageInstalled: Boolean,
     val hasReport: Boolean,
+    /** The test folder [files] were scanned in. */
+    val featuresDir: Path? = null,
 )
 
 /**
@@ -62,6 +64,13 @@ object SaffronProjectScan {
         }.getOrNull() ?: "features"
         return base.toAbsolutePath().resolve(configured).normalize()
     }
+
+    /**
+     * Whether files listed for the test folder [shown] are stale now `saffron status` reports [reported]
+     * (its featuresDir, relative to [base]); runners that report none never ask for a rescan.
+     */
+    fun testFolderMoved(base: Path, shown: Path?, reported: String?): Boolean =
+        shown != null && reported != null && base.toAbsolutePath().resolve(reported.ifBlank { "features" }).normalize() != shown
 
     /** Whether [path] is in the test folder of the project at [base], and not under .saffron, node_modules or .git. */
     fun inFeaturesDir(base: Path, path: Path): Boolean {
@@ -104,6 +113,7 @@ object SaffronProjectScan {
             pendingProposals = countProposals(base.resolve(".saffron/proposals")),
             packageInstalled = Files.isDirectory(base.resolve("node_modules/saffron-ai")),
             hasReport = Files.exists(base.resolve(".saffron/reports/latest.html")),
+            featuresDir = features,
         )
     }
 

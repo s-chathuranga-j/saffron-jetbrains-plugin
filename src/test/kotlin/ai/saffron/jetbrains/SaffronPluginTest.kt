@@ -174,6 +174,32 @@ class SaffronPluginTest : BasePlatformTestCase() {
         }
     }
 
+    fun `test the Files list is scanned again when the status reports another test folder`() {
+        val root = Files.createTempDirectory("saffron-moved").toRealPath()
+        try {
+            Files.createDirectories(root.resolve("features"))
+            Files.createDirectories(root.resolve("specs"))
+            Files.writeString(root.resolve("features/old.feature"), "Feature: Old\n")
+            Files.writeString(root.resolve("specs/new.feature"), "Feature: New\n")
+            Files.writeString(root.resolve("saffron.config.json"), """{"features":"features"}""")
+            val shown = SaffronProjectScan.scan(root.toString())
+            assertEquals(listOf("features/old.feature"), shown.files.map { it.relativePath })
+            assertFalse(SaffronProjectScan.testFolderMoved(root, shown.featuresDir, "features"))
+            assertFalse(SaffronProjectScan.testFolderMoved(root, shown.featuresDir, "./features/"))
+            // A runner before featuresDir, or nothing shown yet: no rescan from the status.
+            assertFalse(SaffronProjectScan.testFolderMoved(root, shown.featuresDir, null))
+            assertFalse(SaffronProjectScan.testFolderMoved(root, null, "specs"))
+            Files.writeString(root.resolve("saffron.config.json"), """{"features":"specs"}""")
+            assertTrue(SaffronProjectScan.testFolderMoved(root, shown.featuresDir, "specs"))
+            val rescanned = SaffronProjectScan.scan(root.toString())
+            assertEquals(listOf("specs/new.feature"), rescanned.files.map { it.relativePath })
+            assertFalse(SaffronProjectScan.testFolderMoved(root, rescanned.featuresDir, "specs"))
+            assertTrue(SaffronProjectScan.testFolderMoved(root, rescanned.featuresDir, "."))
+        } finally {
+            root.toFile().deleteRecursively()
+        }
+    }
+
     fun `test the scan lists real feature files only, a link counting when it leads to one`() {
         val root = Files.createTempDirectory("saffron-links").toRealPath()
         try {

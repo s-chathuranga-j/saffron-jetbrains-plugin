@@ -213,6 +213,8 @@ class ProjectStatus(
     val version: String = "",
     val packageInstalled: Boolean = false,
     val config: StatusConfig = StatusConfig(),
+    /** The effective test folder, relative to the project root; absent from older runners. */
+    val featuresDir: String? = null,
     val features: List<StatusFeature> = emptyList(),
     val tags: List<StatusTag> = emptyList(),
     val proposals: List<StatusProposal> = emptyList(),

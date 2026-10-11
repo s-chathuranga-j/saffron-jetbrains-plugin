@@ -91,7 +91,8 @@ class SaffronPanel(private val project: Project, parent: Disposable) : SimpleToo
                 val root = FileUtil.toSystemIndependentName(service.root.toString()).trimEnd('/') + "/"
                 if (events.any { e ->
                         e.path.startsWith(root) &&
-                            (e.path.endsWith(".saffron") || e.path.endsWith(".feature") || e.path.contains("/.saffron/")) &&
+                            // The config's `features` decides which folder is listed.
+                            (e.path == root + "saffron.config.json" || e.path.endsWith(".saffron") || e.path.endsWith(".feature") || e.path.contains("/.saffron/")) &&
                             // An import's download, there for a moment: the import's own writes reload.
                             !e.path.contains("/.saffron/reports/run-download-")
                     }
@@ -105,8 +106,10 @@ class SaffronPanel(private val project: Project, parent: Disposable) : SimpleToo
         })
         connection.subscribe(SaffronStatusService.TOPIC, StatusListener { load ->
             pendingFromStatus = load.status?.let { it.proposals.size + it.unreadableProposals.size }
-            // Another project chosen: its files, not the last one's.
-            if (service.root != scannedRoot) scan() else state?.let(::show)
+            // Another project chosen, or another test folder: its files, not the last one's.
+            if (service.root != scannedRoot ||
+                SaffronProjectScan.testFolderMoved(service.root, state?.featuresDir, load.status?.featuresDir)
+            ) scan() else state?.let(::show)
         })
         refresh()
     }

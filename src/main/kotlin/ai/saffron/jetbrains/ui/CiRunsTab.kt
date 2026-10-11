@@ -408,6 +408,8 @@ class CiRunsTab(
     private var panelLoads = 0
     /** The run whose page is on screen. */
     private var panelFor: String? = null
+    /** The run the panel speaks of, its page or a message about it ("Loading the results of ..."); null for a general message. */
+    private var panelRun: String? = null
     /** Each run's page as rendered, with its results: cleared with them, the 10 latest kept (each holds its screenshots). */
     private val pages = object : LinkedHashMap<String, String>() {
         override fun removeEldestEntry(eldest: MutableMap.MutableEntry<String, String>?): Boolean = size > 10
@@ -659,6 +661,8 @@ class CiRunsTab(
         } finally {
             rebuilding = false
         }
+        // The run on the panel is gone from the list (or no longer selected): not its page or "Loading" any more.
+        if (panelRun != null && selectedRun()?.id != panelRun) showPanel(null)
     }
 
     /** What importing a run did: warnings first, then each proposal. */
@@ -719,8 +723,15 @@ class CiRunsTab(
             override fun onCancel() {
                 viewing -= key
                 if (base == projectRoot) {
-                    say("Loading the results of ${run.name} #${run.number} was cancelled. Select the run again to load them.")
+                    val cancelled = "Loading the results of ${run.name} #${run.number} was cancelled. Select the run again to load them."
+                    say(cancelled)
                     rebuild()
+                    // The panel no longer says it is loading them.
+                    if (panelRun == run.id && run.id !in views) browser?.let {
+                        panelLoads++
+                        panelFor = null
+                        it.loadHTML(panelMessage(cancelled))
+                    }
                 }
             }
 
@@ -868,6 +879,7 @@ class CiRunsTab(
         // Selecting inside the run on screen changes nothing, and never drops its refresh.
         if (run != null && run.id == panelFor && !again) return
         val load = ++panelLoads
+        panelRun = run?.id
         // A message is no run's page: selecting a run again loads its own.
         fun message(text: String) {
             panelFor = null
