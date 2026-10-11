@@ -11,6 +11,7 @@ import com.intellij.openapi.actionSystem.CommonDataKeys
 import com.intellij.openapi.fileEditor.FileDocumentManager
 import com.intellij.openapi.util.Ref
 import com.intellij.openapi.util.io.FileUtil
+import com.intellij.openapi.vfs.LocalFileSystem
 import com.intellij.openapi.vfs.VfsUtilCore
 import com.intellij.openapi.vfs.VirtualFile
 import com.intellij.openapi.vfs.VirtualFileVisitor
@@ -71,8 +72,20 @@ class SaffronRunConfigurationProducer : LazyRunConfigurationProducer<SaffronRunC
         if (!Files.exists(root.resolve("saffron.config.json")) && root !in roots) return null
         // The project itself, or what is in its test folder: Cucumber files elsewhere are not Saffron's.
         if (path.normalize() != root.toAbsolutePath().normalize() && !SaffronProjectScan.inFeaturesDir(root, path)) return null
-        if (file.isDirectory && (roots.any { it != root && it.startsWith(path) } || !containsSaffronFiles(file))) return null
+        if (file.isDirectory && (roots.any { it != root && it.startsWith(path) } || !containsSaffronFiles(walked(file, path, root)))) return null
         return file to FileUtil.toSystemIndependentName(root.toString())
+    }
+
+    /**
+     * The folder the runner walks for [dir]: the project root runs its test folder, so that
+     * folder is looked in, never the whole root with its build, target and .gradle folders.
+     */
+    private fun walked(dir: VirtualFile, path: Path, root: Path): VirtualFile? {
+        if (path.normalize() != root.toAbsolutePath().normalize()) return dir
+        val features = SaffronProjectScan.featuresDir(root)
+        // Where a linked test folder really is: its files are walked, as the runner walks them.
+        val real = runCatching { features.toRealPath() }.getOrNull() ?: return null
+        return LocalFileSystem.getInstance().findFileByNioFile(real)
     }
 
     /** The target's paths, or the one scenario's `file:name`. */
@@ -99,14 +112,14 @@ class SaffronRunConfigurationProducer : LazyRunConfigurationProducer<SaffronRunC
     }
 
     companion object {
-        private val SKIP = setOf("node_modules", ".git", ".saffron", "dist", "build", "target")
-
-        fun containsSaffronFiles(dir: VirtualFile): Boolean {
+        /** The runner's walk: its SKIPPED_DIRS, linked folders not followed. */
+        fun containsSaffronFiles(dir: VirtualFile?): Boolean {
+            if (dir == null || !dir.isDirectory) return false
             var found = false
-            VfsUtilCore.visitChildrenRecursively(dir, object : VirtualFileVisitor<Any>(limit(12)) {
+            VfsUtilCore.visitChildrenRecursively(dir, object : VirtualFileVisitor<Any>(VirtualFileVisitor.NO_FOLLOW_SYMLINKS) {
                 override fun visitFile(file: VirtualFile): Boolean {
                     if (found) return false
-                    if (file.isDirectory) return file.name !in SKIP
+                    if (file.isDirectory) return file.name !in SaffronProjectScan.RUNNER_SKIP_DIRS
                     if (file.extension in FEATURE_EXTENSIONS) found = true
                     return !found
                 }

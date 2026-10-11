@@ -67,7 +67,7 @@ class CiRun(
     val attempt: Int? = null,
     /** Proposals pending here that came from this run. */
     val pending: Int = 0,
-    /** What the run left to view, from saffron-ai 0.10.0 (GitHub): its results, a summary only, expired or none. */
+    /** What the run left to view, from saffron-ai 1.0.0 (GitHub): its results, a summary only, expired or none. */
     val results: CiResults? = null,
 )
 
@@ -154,7 +154,7 @@ class RunView(
     val scenarios: List<CiScenario> = emptyList(),
     val proposals: List<CiViewProposal> = emptyList(),
     val warnings: List<String> = emptyList(),
-    /** The run as one page, written beside its report (saffron-ai 0.10.0): what the results panel shows. */
+    /** The run as one page, written beside its report (saffron-ai 1.0.0): what the results panel shows. */
     val panelHtml: String? = null,
 )
 
@@ -392,7 +392,7 @@ class CiRunsTab(
     private var headFor: Path? = null
     private var headWatch: LocalFileSystem.WatchRequest? = null
 
-    // The selected run's results as one page (saffron-ai 0.10.0): `saffron report --run <id> --panel`,
+    // The selected run's results as one page (saffron-ai 1.0.0): `saffron report --run <id> --panel`,
     // the page the VS Code extension shows too, below the runs. Its buttons call back through [actQuery].
     // An IDE whose JCEF classes this plugin cannot load keeps the runs alone.
     private val browser: JBCefBrowser? = try {
@@ -959,11 +959,11 @@ class CiRunsTab(
 }
 
 /**
- * Why a runner shows no results page: it writes none before saffron-ai 0.10.0. Said from the
- * project's own version, never "update to latest", which may not have 0.10.0 yet.
+ * Why a runner shows no results page: it writes none before saffron-ai 1.0.0. Said from the
+ * project's own version, never "update to latest", which may not have 1.0.0 yet.
  */
 internal fun panelNeedsRunner(version: String?): String =
-    "The results page arrives with saffron-ai 0.10.0" + (version?.takeIf { it.isNotBlank() }?.let { "; this project has $it" } ?: "") + "."
+    "The results page arrives with saffron-ai 1.0.0" + (version?.takeIf { it.isNotBlank() }?.let { "; this project has $it" } ?: "") + "."
 
 /** A page in the results' own colours, for the moments there is no page to show. */
 private fun panelMessage(text: String) =

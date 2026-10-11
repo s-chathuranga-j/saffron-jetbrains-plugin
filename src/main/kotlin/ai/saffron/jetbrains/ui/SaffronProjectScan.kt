@@ -35,7 +35,10 @@ data class SaffronProjectState(
  */
 object SaffronProjectScan {
 
+    /** Folders skipped when looking for Saffron projects (discovery only). */
     internal val SKIP_DIRS = setOf("node_modules", ".git", ".saffron", "dist", "build", "target", ".idea")
+    /** The runner's SKIPPED_DIRS: every other file in the test folder is one it runs, so one listed and runnable here. */
+    internal val RUNNER_SKIP_DIRS = setOf(".saffron", "node_modules", ".git")
     private val SCENARIO = Regex("^\\s*(Scenario( Outline| Template)?|Example):")
     private val STEP_SET = Regex("^\\s*StepSet:")
 
@@ -49,22 +52,22 @@ object SaffronProjectScan {
     }
 
     /**
-     * The configured test folder: `features` in saffron.config.json, else the runner's "features";
+     * The configured test folder: `features` in saffron.config.json, else (blank too) the runner's "features";
      * relative to [base] or absolute, as `saffron status` reports featuresDir. "." is [base] itself.
      */
     fun featuresDir(base: Path): Path {
         val configured = runCatching {
             JsonParser.parseString(Files.readString(base.resolve("saffron.config.json"))).asJsonObject.get("features")
-                ?.takeIf { it.isJsonPrimitive && it.asJsonPrimitive.isString }?.asString
+                ?.takeIf { it.isJsonPrimitive && it.asJsonPrimitive.isString }?.asString?.takeIf { it.isNotBlank() }
         }.getOrNull() ?: "features"
         return base.toAbsolutePath().resolve(configured).normalize()
     }
 
-    /** Whether [path] is in the test folder of the project at [base], and not under .saffron, node_modules, .git or a build folder. */
+    /** Whether [path] is in the test folder of the project at [base], and not under .saffron, node_modules or .git. */
     fun inFeaturesDir(base: Path, path: Path): Boolean {
         val dir = featuresDir(base)
         val p = path.toAbsolutePath().normalize()
-        return p.startsWith(dir) && dir.relativize(p).none { it.name in SKIP_DIRS }
+        return p.startsWith(dir) && dir.relativize(p).none { it.name in RUNNER_SKIP_DIRS }
     }
 
     fun scan(basePath: String): SaffronProjectState {
@@ -72,15 +75,21 @@ object SaffronProjectScan {
         val files = mutableListOf<SaffronFile>()
         // The runner's test folder only: .feature files elsewhere are another tool's (Cucumber, Behat).
         val features = featuresDir(base)
-        if (Files.isDirectory(features)) Files.walkFileTree(features, object : java.nio.file.SimpleFileVisitor<Path>() {
+        // The runner's walk: linked folders are not followed (walkFileTree's default), so no depth cap
+        // is needed. A linked test folder itself is walked where it really is, as the runner reads it.
+        val start = runCatching { features.toRealPath() }.getOrNull()
+        // Windows junctions read as plain folders, so one leading back up would loop: each real folder once.
+        val seen = HashSet<Path>()
+        if (start != null && Files.isDirectory(start)) Files.walkFileTree(start, object : java.nio.file.SimpleFileVisitor<Path>() {
             override fun preVisitDirectory(dir: Path, attrs: java.nio.file.attribute.BasicFileAttributes): java.nio.file.FileVisitResult =
-                // A folder with its own config is a nested project: its files are its own.
-                if (dir != features && (dir.name in SKIP_DIRS || Files.exists(dir.resolve("saffron.config.json")))) java.nio.file.FileVisitResult.SKIP_SUBTREE
-                else if (features.relativize(dir).nameCount > 12) java.nio.file.FileVisitResult.SKIP_SUBTREE
+                if (dir != start && dir.name in RUNNER_SKIP_DIRS) java.nio.file.FileVisitResult.SKIP_SUBTREE
+                else if (!seen.add(runCatching { dir.toRealPath() }.getOrDefault(dir))) java.nio.file.FileVisitResult.SKIP_SUBTREE
                 else java.nio.file.FileVisitResult.CONTINUE
 
             override fun visitFile(file: Path, attrs: java.nio.file.attribute.BasicFileAttributes): java.nio.file.FileVisitResult {
-                if (file.extension in FEATURE_EXTENSIONS) files += describe(base, file)
+                // Real files only: a link counts when it leads to one, never when dangling or to a folder.
+                val regular = attrs.isRegularFile || (attrs.isSymbolicLink && Files.isRegularFile(file))
+                if (regular && file.extension in FEATURE_EXTENSIONS) files += describe(base, features.resolve(start.relativize(file)))
                 return java.nio.file.FileVisitResult.CONTINUE
             }
 

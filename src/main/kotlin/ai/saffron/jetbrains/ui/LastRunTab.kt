@@ -45,7 +45,8 @@ internal fun attentionTraceSelector(a: StatusAttention): String =
     "${a.feature}:${a.scenario}" + (a.browser?.let { "@$it" } ?: "")
 
 internal fun screenshotToShow(base: String, shot: StatusEvidence, scenario: String): Screenshot {
-    val file = java.io.File(base, shot.file)
+    val file = projectFile(java.nio.file.Path.of(base), shot.file)?.toFile()
+        ?: return Screenshot(problem = "Not opened: ${shot.file} is outside the project.")
     if (!file.isFile) return Screenshot(problem = "The screenshot of \"$scenario\" is gone. Screenshots are kept for the latest run only.")
     val bytes = currentEvidence(file, shot.sha256)
         ?: return Screenshot(problem = "A later run replaced the screenshot of \"$scenario\". Refresh to see its results.")
@@ -238,7 +239,7 @@ class LastRunTab(project: Project, parent: Disposable) : StatusTab(project, pare
 
     /** The run's HTML report, in the system browser: the full story, every scenario and step. */
     private fun openReport() {
-        val report = reportHtml?.let { projectRoot.resolve(it) }?.takeIf { java.nio.file.Files.exists(it) }
+        val report = reportHtml?.let { projectFile(projectRoot, it) }?.takeIf { java.nio.file.Files.exists(it) }
         if (report == null) {
             note.text = "No HTML report for the last run. Run something first."
             return

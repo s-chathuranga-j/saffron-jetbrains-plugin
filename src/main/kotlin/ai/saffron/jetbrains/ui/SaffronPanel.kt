@@ -65,6 +65,8 @@ class SaffronPanel(private val project: Project, parent: Disposable) : SimpleToo
     private var scannedRoot: java.nio.file.Path? = null
     /** The root the files on screen were scanned for. */
     private var shownRoot: java.nio.file.Path? = null
+    /** Why the latest scan failed; null while one is running or after one landed. */
+    private var scanError: String? = null
     /** Bumped by every scan: only the latest one, for the current root, may publish. */
     private val scanGeneration = java.util.concurrent.atomic.AtomicInteger()
     private val service = SaffronStatusService.getInstance(project)
@@ -163,7 +165,7 @@ class SaffronPanel(private val project: Project, parent: Disposable) : SimpleToo
     private fun runSelected() {
         // Files scanned for another project would resolve against this one's root.
         if (shownRoot != service.root) {
-            hint.text = "Still loading this project's files: try again in a moment."
+            hint.text = scanError ?: "Still loading this project's files: try again in a moment."
             return
         }
         val selected = all.filter { list.isItemSelected(it) }
@@ -212,15 +214,21 @@ class SaffronPanel(private val project: Project, parent: Disposable) : SimpleToo
             list.clear()
         }
         scannedRoot = root
+        scanError = null
         val generation = scanGeneration.incrementAndGet()
         ApplicationManager.getApplication().executeOnPooledThread {
-            val scanned = runCatching { SaffronProjectScan.scan(root.toString()) }.getOrNull() ?: return@executeOnPooledThread
+            val scanned = runCatching { SaffronProjectScan.scan(root.toString()) }
             // A slower scan of the project chosen before must not replace the
             // current one's files: runs resolve them against the current root.
             ApplicationManager.getApplication().invokeLater({
                 if (generation == scanGeneration.get() && root == service.root) {
-                    shownRoot = root
-                    show(scanned)
+                    scanned.onSuccess {
+                        shownRoot = root
+                        show(it)
+                    }.onFailure {
+                        scanError = "Could not list this project's files: ${it.message ?: it.javaClass.simpleName}. Refresh to try again."
+                        hint.text = scanError
+                    }
                 }
             }, project.disposed)
         }

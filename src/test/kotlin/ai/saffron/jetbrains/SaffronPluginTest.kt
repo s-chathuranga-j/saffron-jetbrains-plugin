@@ -20,6 +20,8 @@ import ai.saffron.jetbrains.ui.viewRows
 import ai.saffron.jetbrains.ui.CiRuns
 import ai.saffron.jetbrains.ui.listedRuns
 import ai.saffron.jetbrains.ui.megabytes
+import ai.saffron.jetbrains.ui.SaffronProjectScan
+import ai.saffron.jetbrains.ui.projectFile
 import ai.saffron.jetbrains.ui.CI_MAX_DOWNLOAD_KEY
 import com.google.gson.Gson
 import com.intellij.openapi.ui.TestDialog
@@ -108,6 +110,85 @@ class SaffronPluginTest : BasePlatformTestCase() {
 
     private fun sha256(text: String) =
         java.security.MessageDigest.getInstance("SHA-256").digest(text.toByteArray()).joinToString("") { "%02x".format(it) }
+
+    fun `test a path from a report or CI run opens only inside the project`() {
+        val root = java.nio.file.Path.of("/work/shop")
+        assertEquals(root.resolve("features/login.saffron"), projectFile(root, "features/login.saffron"))
+        assertEquals(root.resolve("features/login.saffron"), projectFile(root, "features/../features/./login.saffron"))
+        assertEquals(root.resolve("..x/a.saffron"), projectFile(root, "..x/a.saffron"))
+        for (outside in listOf("../shop-other/a.saffron", "features/../../a.saffron", "..", "/etc/passwd", "", ".", "a\u0000b")) {
+            assertNull(outside, projectFile(root, outside))
+        }
+        // A sibling whose name starts with the root's is not inside it.
+        assertNull(projectFile(root, "../shopping/a.saffron"))
+    }
+
+    fun `test a report path that is a symlink inside the project to a file outside it is refused`() {
+        val outside = Files.createTempDirectory("saffron-outside")
+        val root = Files.createTempDirectory("saffron-linked")
+        try {
+            Files.writeString(outside.resolve("secret.txt"), "x")
+            Files.createDirectories(root.resolve("features"))
+            Files.writeString(root.resolve("features/a.saffron"), "Feature: A\n")
+            Files.createSymbolicLink(root.resolve("linked.txt"), outside.resolve("secret.txt"))
+            Files.createSymbolicLink(root.resolve("linkdir"), outside)
+            assertNull(projectFile(root, "linked.txt"))
+            assertNull(projectFile(root, "linkdir/secret.txt"))
+            assertEquals(root.resolve("features/a.saffron"), projectFile(root, "features/a.saffron"))
+            // Not written yet: checked by its path alone.
+            assertEquals(root.resolve("features/new.saffron"), projectFile(root, "features/new.saffron"))
+        } finally {
+            root.toFile().deleteRecursively()
+            outside.toFile().deleteRecursively()
+        }
+    }
+
+    fun `test a symlinked test or saffron folder, or a test folder outside the project, opens and a link in them to elsewhere does not`() {
+        val ws = Files.createTempDirectory("saffron-mono").toRealPath()
+        try {
+            for (dir in listOf("shared", "state/reports", "e2e", "secret", "mono", "app", "abs")) Files.createDirectories(ws.resolve(dir))
+            Files.writeString(ws.resolve("shared/a.feature"), "Feature: A\n")
+            Files.writeString(ws.resolve("state/reports/latest.html"), "<html></html>")
+            Files.writeString(ws.resolve("e2e/x.feature"), "Feature: X\n")
+            Files.writeString(ws.resolve("secret/s.txt"), "x")
+            Files.writeString(ws.resolve("mono/saffron.config.json"), "{}")
+            Files.writeString(ws.resolve("app/saffron.config.json"), """{"features":"../e2e"}""")
+            Files.writeString(ws.resolve("abs/saffron.config.json"), """{"features":${com.google.gson.Gson().toJson(ws.resolve("e2e").toString())}}""")
+            val mono = ws.resolve("mono")
+            Files.createSymbolicLink(mono.resolve("features"), ws.resolve("shared"))
+            Files.createSymbolicLink(mono.resolve(".saffron"), ws.resolve("state"))
+            Files.createSymbolicLink(ws.resolve("shared/evil"), ws.resolve("secret"))
+            assertEquals(mono.resolve("features/a.feature"), projectFile(mono, "features/a.feature"))
+            // Open Report with a linked .saffron: its report is found.
+            assertEquals(mono.resolve(".saffron/reports/latest.html"), projectFile(mono, ".saffron/reports/latest.html"))
+            assertEquals(ws.resolve("e2e/x.feature"), projectFile(ws.resolve("app"), "../e2e/x.feature"))
+            assertEquals(ws.resolve("e2e/x.feature"), projectFile(ws.resolve("abs"), "../e2e/x.feature"))
+            // In a trusted folder by its path, out of every trusted folder in fact.
+            assertNull(projectFile(mono, "features/evil/s.txt"))
+            // Another project's test folder is not this one's.
+            assertNull(projectFile(mono, "../e2e/x.feature"))
+            // The scan lists the linked test folder's files under their own path.
+            assertEquals(listOf("features/a.feature"), SaffronProjectScan.scan(mono.toString()).files.map { it.relativePath })
+        } finally {
+            ws.toFile().deleteRecursively()
+        }
+    }
+
+    fun `test the scan lists real feature files only, a link counting when it leads to one`() {
+        val root = Files.createTempDirectory("saffron-links").toRealPath()
+        try {
+            Files.createDirectories(root.resolve("features/folder"))
+            Files.writeString(root.resolve("features/a.saffron"), "Feature: A\n\nScenario: A\n  Given x\n")
+            Files.createSymbolicLink(root.resolve("features/linked.saffron"), root.resolve("features/a.saffron"))
+            Files.createSymbolicLink(root.resolve("features/dangling.feature"), root.resolve("features/nowhere.feature"))
+            Files.createSymbolicLink(root.resolve("features/dir.feature"), root.resolve("features/folder"))
+            // A link back up is not followed: no loop, no repeats.
+            Files.createSymbolicLink(root.resolve("features/folder/up"), root.resolve("features"))
+            assertEquals(listOf("features/a.saffron", "features/linked.saffron"), SaffronProjectScan.scan(root.toString()).files.map { it.relativePath })
+        } finally {
+            root.toFile().deleteRecursively()
+        }
+    }
 
     fun `test a Last Run screenshot opens only while it is the picture that run took`() {
         val shots = Files.createTempDirectory("saffron-shots").toFile()
@@ -464,8 +545,8 @@ class SaffronPluginTest : BasePlatformTestCase() {
     private fun node(n: DefaultMutableTreeNode) = n.userObject as RunNode
 
     fun `test a runner with no results page is told the release that brings it, and an unpriced CI run shows no cost`() {
-        assertEquals("The results page arrives with saffron-ai 0.10.0; this project has 0.9.9.", ai.saffron.jetbrains.ui.panelNeedsRunner("0.9.9"))
-        assertEquals("The results page arrives with saffron-ai 0.10.0.", ai.saffron.jetbrains.ui.panelNeedsRunner(null))
+        assertEquals("The results page arrives with saffron-ai 1.0.0; this project has 0.9.9.", ai.saffron.jetbrains.ui.panelNeedsRunner("0.9.9"))
+        assertEquals("The results page arrives with saffron-ai 1.0.0.", ai.saffron.jetbrains.ui.panelNeedsRunner(null))
         fun totals(json: String) = (viewRows(Gson().fromJson("""{"bundle":{},"totals":$json}""", RunView::class.java), null)[0].userObject as RunNode).detail
         assertEquals("3 AI calls", totals("""{"aiCalls":3,"costUsd":0}"""))
         assertEquals("3 AI calls · $0.25", totals("""{"aiCalls":3,"costUsd":0.25}"""))

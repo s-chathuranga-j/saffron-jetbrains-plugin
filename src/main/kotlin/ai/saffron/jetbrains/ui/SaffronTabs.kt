@@ -26,12 +26,34 @@ import com.intellij.ui.components.JBTextArea
 import com.intellij.util.ui.JBUI
 import com.intellij.util.ui.UIUtil
 import java.awt.BorderLayout
+import java.nio.file.Files
 import java.nio.file.Path
 import javax.swing.BoxLayout
 import javax.swing.Icon
 import javax.swing.JList
 import javax.swing.JPanel
 import javax.swing.JSplitPane
+
+/**
+ * [rel] inside a trusted root of the project at [root], or null when it leads out of
+ * them all (`../`, an absolute path, or a symlink to somewhere else): paths from a
+ * report, which an imported CI run wrote, are never trusted. The trusted roots are the
+ * project, its test folder (which may sit outside it, as `"features": "../e2e"`) and
+ * its .saffron folder, each by its path and by where it really is, so a symlinked test
+ * or .saffron folder in a monorepo opens.
+ */
+internal fun projectFile(root: Path, rel: String): Path? {
+    val base = root.toAbsolutePath().normalize()
+    val full = runCatching { base.resolve(rel).normalize() }.getOrNull()?.takeIf { rel.isNotEmpty() } ?: return null
+    val trusted = listOf(base, SaffronProjectScan.featuresDir(base), base.resolve(".saffron"))
+    val real = trusted.map { r -> runCatching { r.toRealPath() }.getOrDefault(r) }
+    fun inside(p: Path, roots: List<Path>) = roots.any { p.startsWith(it) && p != it }
+    if (!inside(full, trusted + real)) return null
+    // A file not written yet has no link to follow: its path alone decides.
+    if (!Files.exists(full)) return full
+    val target = runCatching { full.toRealPath() }.getOrNull() ?: return null
+    return full.takeIf { inside(target, real) }
+}
 
 /** Shared scaffolding for the status-driven tabs. */
 abstract class StatusTab(protected val project: Project, parent: Disposable) : SimpleToolWindowPanel(true, true) {
@@ -66,6 +88,12 @@ abstract class StatusTab(protected val project: Project, parent: Disposable) : S
         render(status)
     }
 
+    /** Says a path from a report was not opened because it leads out of the project. */
+    protected fun refused(rel: String): Boolean {
+        note.text = "Not opened: $rel is outside the project."
+        return false
+    }
+
     /** Takes down a tab's own message once it no longer applies, putting the status's note back. */
     protected fun clearNote() {
         note.text = statusNote
@@ -94,7 +122,8 @@ abstract class StatusTab(protected val project: Project, parent: Disposable) : S
      * [root] is the Saffron project the row was listed for, which may no longer be the one shown.
      */
     protected fun openScenario(features: List<StatusFeature>, feature: String, scenario: String, root: Path = projectRoot): Boolean {
-        val vf = LocalFileSystem.getInstance().refreshAndFindFileByNioFile(root.resolve(feature)) ?: return false
+        val file = projectFile(root, feature) ?: return refused(feature)
+        val vf = LocalFileSystem.getInstance().refreshAndFindFileByNioFile(file) ?: return false
         val line = features.firstOrNull { it.path == feature }?.scenarios?.firstOrNull { it.name == scenario }?.line
         OpenFileDescriptor(project, vf, ((line ?: 1) - 1).coerceAtLeast(0), 0).navigate(true)
         return true

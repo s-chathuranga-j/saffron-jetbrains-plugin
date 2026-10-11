@@ -422,6 +422,25 @@ class SaffronRunConfigurationTest : BasePlatformTestCase() {
         }
     }
 
+    fun `test right-click Run on the project root looks in its test folder, not build or target`() {
+        val base = Path.of(project.basePath!!)
+        try {
+            Files.writeString(base.resolve("saffron.config.json"), "{}")
+            Files.createDirectories(base.resolve("build"))
+            Files.writeString(base.resolve("build/copy.saffron"), "Feature: C\n\nScenario: A\n  Given x\n")
+            SaffronStatusService.getInstance(project).discoverRoots()
+            // Nothing in the test folder: nothing the runner would run.
+            assertEmpty(offered(base))
+            Files.createDirectories(base.resolve("features"))
+            Files.writeString(base.resolve("features/a.saffron"), "Feature: A\n\nScenario: A\n  Given x\n")
+            assertEquals("", offered(base).single().paths)
+        } finally {
+            Files.deleteIfExists(base.resolve("saffron.config.json"))
+            listOf("build", "features").forEach { base.resolve(it).toFile().deleteRecursively() }
+            SaffronStatusService.getInstance(project).discoverRoots()
+        }
+    }
+
     fun `test a configuration saved with a blank working directory is found again, not duplicated`() {
         val base = Path.of(project.basePath!!)
         val runManager = RunManager.getInstance(project)
@@ -518,9 +537,25 @@ class SaffronRunConfigurationTest : BasePlatformTestCase() {
             Files.writeString(base.resolve("e2e/node_modules/x/dep.feature"), "Feature: D\n\nScenario: A\n  Given x\n")
             Files.writeString(base.resolve("features/old.feature"), "Feature: O\n\nScenario: A\n  Given x\n")
             Files.writeString(base.resolve("src/test/cart.feature"), "Feature: C\n\nScenario: A\n  Given x\n")
+            // The runner skips only .saffron, node_modules and .git: build-like folders, a nested
+            // config and a deep folder are all run, so all listed and runnable.
+            val deep = "e2e/" + (1..14).joinToString("/") { "d$it" } + "/deep.saffron"
+            val runs = listOf("e2e/.idea/i.saffron", "e2e/build/b.saffron", "e2e/dist/d.feature", "e2e/sub/s.saffron", "e2e/target/t.saffron", deep)
+            for (f in runs) {
+                Files.createDirectories(base.resolve(f).parent)
+                Files.writeString(base.resolve(f), "Feature: X\n\nScenario: A\n  Given x\n")
+            }
+            Files.writeString(base.resolve("e2e/sub/saffron.config.json"), """{"features":"."}""")
+            SaffronStatusService.getInstance(project).discoverRoots()
+            assertEquals((runs + "e2e/login.saffron").sorted(), SaffronProjectScan.scan(base.toString()).files.map { it.relativePath })
+            assertEquals("e2e/login.saffron", offered(base.resolve("e2e/login.saffron")).single().paths)
+            assertEquals("e2e/build/b.saffron", offered(base.resolve("e2e/build/b.saffron")).single().paths)
+            assertEquals("e2e/build", offered(base.resolve("e2e/build")).single().paths)
+            assertEquals(deep, offered(base.resolve(deep)).single().paths)
+            runs.forEach { base.resolve(it).toFile().delete() }
+            listOf(".idea", "build", "dist", "sub", "target", "d1").forEach { base.resolve("e2e/$it").toFile().deleteRecursively() }
             SaffronStatusService.getInstance(project).discoverRoots()
             assertEquals(listOf("e2e/login.saffron"), SaffronProjectScan.scan(base.toString()).files.map { it.relativePath })
-            assertEquals("e2e/login.saffron", offered(base.resolve("e2e/login.saffron")).single().paths)
             assertEmpty(offered(base.resolve("features/old.feature")))
             assertEmpty(offered(base.resolve("src/test/cart.feature")))
             assertEmpty(offered(base.resolve("src")))
@@ -533,6 +568,12 @@ class SaffronRunConfigurationTest : BasePlatformTestCase() {
             )
             assertEquals("src/test/cart.feature", offered(base.resolve("src/test/cart.feature")).single().paths)
             assertEmpty(offered(base.resolve("e2e/node_modules/x/dep.feature")))
+            // Blank is the runner's default, "features", as missing is.
+            for (blank in listOf("", "   ")) {
+                Files.writeString(base.resolve("saffron.config.json"), """{"features":"$blank"}""")
+                assertEquals(base.resolve("features").toAbsolutePath().normalize(), SaffronProjectScan.featuresDir(base))
+                assertEquals(listOf("features/old.feature"), SaffronProjectScan.scan(base.toString()).files.map { it.relativePath })
+            }
         } finally {
             Files.deleteIfExists(base.resolve("saffron.config.json"))
             listOf("e2e", "features", "src").forEach { base.resolve(it).toFile().deleteRecursively() }

@@ -146,7 +146,7 @@ class OrphansTab(project: Project, parent: Disposable) : StatusTab(project, pare
     private fun openSelected(): Boolean {
         val row = (tree.lastSelectedPathComponent as? DefaultMutableTreeNode)?.userObject as? OrphanRow ?: return false
         val file = row.file ?: return false
-        val vf = LocalFileSystem.getInstance().refreshAndFindFileByNioFile(projectRoot.resolve(file)) ?: return false
+        val vf = LocalFileSystem.getInstance().refreshAndFindFileByNioFile(projectFile(projectRoot, file) ?: return refused(file)) ?: return false
         FileEditorManager.getInstance(project).openFile(vf, true)
         return true
     }
