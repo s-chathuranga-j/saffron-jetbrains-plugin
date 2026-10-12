@@ -2,7 +2,9 @@ package ai.saffron.jetbrains.ui
 
 import com.google.gson.JsonParser
 import java.nio.file.Files
+import java.nio.file.LinkOption
 import java.nio.file.Path
+import java.nio.file.attribute.BasicFileAttributes
 import java.time.Instant
 import kotlin.io.path.extension
 import kotlin.io.path.isDirectory
@@ -84,27 +86,7 @@ object SaffronProjectScan {
         val files = mutableListOf<SaffronFile>()
         // The runner's test folder only: .feature files elsewhere are another tool's (Cucumber, Behat).
         val features = featuresDir(base)
-        // The runner's walk: linked folders are not followed (walkFileTree's default), so no depth cap
-        // is needed. A linked test folder itself is walked where it really is, as the runner reads it.
-        val start = runCatching { features.toRealPath() }.getOrNull()
-        // Windows junctions read as plain folders, so one leading back up would loop: each real folder once.
-        val seen = HashSet<Path>()
-        if (start != null && Files.isDirectory(start)) Files.walkFileTree(start, object : java.nio.file.SimpleFileVisitor<Path>() {
-            override fun preVisitDirectory(dir: Path, attrs: java.nio.file.attribute.BasicFileAttributes): java.nio.file.FileVisitResult =
-                if (dir != start && dir.name in RUNNER_SKIP_DIRS) java.nio.file.FileVisitResult.SKIP_SUBTREE
-                else if (!seen.add(runCatching { dir.toRealPath() }.getOrDefault(dir))) java.nio.file.FileVisitResult.SKIP_SUBTREE
-                else java.nio.file.FileVisitResult.CONTINUE
-
-            override fun visitFile(file: Path, attrs: java.nio.file.attribute.BasicFileAttributes): java.nio.file.FileVisitResult {
-                // Real files only: a link counts when it leads to one, never when dangling or to a folder.
-                val regular = attrs.isRegularFile || (attrs.isSymbolicLink && Files.isRegularFile(file))
-                if (regular && file.extension in FEATURE_EXTENSIONS) files += describe(base, features.resolve(start.relativize(file)))
-                return java.nio.file.FileVisitResult.CONTINUE
-            }
-
-            override fun visitFileFailed(file: Path, exc: java.io.IOException): java.nio.file.FileVisitResult =
-                java.nio.file.FileVisitResult.CONTINUE
-        })
+        for (file in runnerFiles(features)) files += describe(base, file)
         files.sortBy { it.relativePath }
         val reports = base.resolve(".saffron/reports/latest.json")
         return SaffronProjectState(
@@ -115,6 +97,41 @@ object SaffronProjectScan {
             hasReport = Files.exists(base.resolve(".saffron/reports/latest.html")),
             featuresDir = features,
         )
+    }
+
+    /**
+     * The feature files the runner runs in [dir], by the paths it reads them at: its walk
+     * (findSourceFiles), SKIPPED_DIRS skipped and linked folders followed wherever they lead.
+     * Each folder is walked once by its real path, so a link loop or a Windows junction
+     * leading back up ends, and real folders before any link, so a folder reachable both
+     * ways keeps its own path. A link to a file counts when it leads to one. With [first],
+     * stops at the first file found.
+     */
+    internal fun runnerFiles(dir: Path, first: Boolean = false): List<Path> {
+        val files = mutableListOf<Path>()
+        val seen = HashSet<Path>()
+        val links = mutableListOf<Path>()
+        fun walk(at: Path) {
+            val real = runCatching { at.toRealPath() }.getOrNull() ?: return
+            if (!seen.add(real)) return
+            val entries = runCatching { Files.list(at).use { it.toList() } }.getOrNull() ?: return
+            for (entry in entries) {
+                if (first && files.isNotEmpty()) return
+                val attrs = runCatching { Files.readAttributes(entry, BasicFileAttributes::class.java, LinkOption.NOFOLLOW_LINKS) }.getOrNull() ?: continue
+                val feature = entry.extension in FEATURE_EXTENSIONS
+                when {
+                    attrs.isSymbolicLink && Files.isDirectory(entry) -> if (entry.name !in RUNNER_SKIP_DIRS) links.add(entry)
+                    attrs.isSymbolicLink -> if (feature && Files.isRegularFile(entry)) files.add(entry)
+                    attrs.isDirectory -> if (entry.name !in RUNNER_SKIP_DIRS) walk(entry)
+                    attrs.isRegularFile -> if (feature) files.add(entry)
+                }
+            }
+        }
+        walk(dir)
+        // Then the linked folders, each once by its real path (links found in them join the queue).
+        var i = 0
+        while (i < links.size && !(first && files.isNotEmpty())) walk(links[i++])
+        return files
     }
 
     private fun describe(base: Path, file: Path): SaffronFile {

@@ -459,6 +459,27 @@ class SaffronRunConfigurationTest : BasePlatformTestCase() {
         }
     }
 
+    fun `test a linked folder in the test folder is listed and runnable, as the runner follows it`() {
+        val base = Path.of(project.basePath!!)
+        val shared = Files.createTempDirectory("saffron-shared-features")
+        try {
+            Files.writeString(base.resolve("saffron.config.json"), "{}")
+            Files.createDirectories(base.resolve("features"))
+            Files.writeString(shared.resolve("checkout.saffron"), "Feature: C\n\nScenario: Checkout\n  Given y\n")
+            // features/shared -> a folder outside the project, the only feature files there are.
+            Files.createSymbolicLink(base.resolve("features/shared"), shared)
+            SaffronStatusService.getInstance(project).discoverRoots()
+            assertEquals(listOf("features/shared/checkout.saffron"), SaffronProjectScan.scan(base.toString()).files.map { it.relativePath })
+            assertEquals("", offered(base).single().paths)
+            assertEquals("features", offered(base.resolve("features")).single().paths)
+        } finally {
+            Files.deleteIfExists(base.resolve("saffron.config.json"))
+            base.resolve("features").toFile().deleteRecursively()
+            shared.toFile().deleteRecursively()
+            SaffronStatusService.getInstance(project).discoverRoots()
+        }
+    }
+
     fun `test a configuration saved with a blank working directory is found again, not duplicated`() {
         val base = Path.of(project.basePath!!)
         val runManager = RunManager.getInstance(project)

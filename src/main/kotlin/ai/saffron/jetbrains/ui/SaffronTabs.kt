@@ -26,7 +26,6 @@ import com.intellij.ui.components.JBTextArea
 import com.intellij.util.ui.JBUI
 import com.intellij.util.ui.UIUtil
 import java.awt.BorderLayout
-import java.nio.file.Files
 import java.nio.file.Path
 import javax.swing.BoxLayout
 import javax.swing.Icon
@@ -36,11 +35,11 @@ import javax.swing.JSplitPane
 
 /**
  * [rel] inside a trusted root of the project at [root], or null when it leads out of
- * them all (`../`, an absolute path, or a symlink to somewhere else): paths from a
- * report, which an imported CI run wrote, are never trusted. The trusted roots are the
- * project, its test folder (which may sit outside it, as `"features": "../e2e"`) and
- * its .saffron folder, each by its path and by where it really is, so a symlinked test
- * or .saffron folder in a monorepo opens.
+ * them all (`../` or an absolute path): paths from a report, which an imported CI run
+ * wrote, are never trusted. The trusted roots are the project, its test folder (which
+ * may sit outside it, as `"features": "../e2e"`) and its .saffron folder. The path is
+ * checked as written, the way the runner checks it: the runner follows linked folders
+ * inside the test folder wherever they lead, so a file it runs through one opens here.
  */
 internal fun projectFile(root: Path, rel: String): Path? {
     val base = root.toAbsolutePath().normalize()
@@ -48,11 +47,7 @@ internal fun projectFile(root: Path, rel: String): Path? {
     val trusted = listOf(base, SaffronProjectScan.featuresDir(base), base.resolve(".saffron"))
     val real = trusted.map { r -> runCatching { r.toRealPath() }.getOrDefault(r) }
     fun inside(p: Path, roots: List<Path>) = roots.any { p.startsWith(it) && p != it }
-    if (!inside(full, trusted + real)) return null
-    // A file not written yet has no link to follow: its path alone decides.
-    if (!Files.exists(full)) return full
-    val target = runCatching { full.toRealPath() }.getOrNull() ?: return null
-    return full.takeIf { inside(target, real) }
+    return full.takeIf { inside(it, trusted + real) }
 }
 
 /** Shared scaffolding for the status-driven tabs. */

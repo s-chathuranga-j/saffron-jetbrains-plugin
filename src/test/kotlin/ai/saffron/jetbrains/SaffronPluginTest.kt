@@ -123,7 +123,10 @@ class SaffronPluginTest : BasePlatformTestCase() {
         assertNull(projectFile(root, "../shopping/a.saffron"))
     }
 
-    fun `test a report path that is a symlink inside the project to a file outside it is refused`() {
+    // Was "a symlink inside the project to a file outside it is refused": the runner
+    // follows linked folders in the test folder wherever they lead and checks a path
+    // as written, so the editor opens what the runner runs.
+    fun `test a report path through a link inside the project opens by its path, as the runner reads it`() {
         val outside = Files.createTempDirectory("saffron-outside")
         val root = Files.createTempDirectory("saffron-linked")
         try {
@@ -132,8 +135,11 @@ class SaffronPluginTest : BasePlatformTestCase() {
             Files.writeString(root.resolve("features/a.saffron"), "Feature: A\n")
             Files.createSymbolicLink(root.resolve("linked.txt"), outside.resolve("secret.txt"))
             Files.createSymbolicLink(root.resolve("linkdir"), outside)
-            assertNull(projectFile(root, "linked.txt"))
-            assertNull(projectFile(root, "linkdir/secret.txt"))
+            assertEquals(root.resolve("linked.txt"), projectFile(root, "linked.txt"))
+            assertEquals(root.resolve("linkdir/secret.txt"), projectFile(root, "linkdir/secret.txt"))
+            // Out of the project as written stays refused, whatever the links.
+            assertNull(projectFile(root, "linkdir/../../x.saffron"))
+            assertNull(projectFile(root, outside.resolve("secret.txt").toString()))
             assertEquals(root.resolve("features/a.saffron"), projectFile(root, "features/a.saffron"))
             // Not written yet: checked by its path alone.
             assertEquals(root.resolve("features/new.saffron"), projectFile(root, "features/new.saffron"))
@@ -143,7 +149,9 @@ class SaffronPluginTest : BasePlatformTestCase() {
         }
     }
 
-    fun `test a symlinked test or saffron folder, or a test folder outside the project, opens and a link in them to elsewhere does not`() {
+    // Was "...and a link in them to elsewhere does not": a linked folder inside the
+    // test folder now opens wherever it leads, as the runner runs it.
+    fun `test a symlinked test or saffron folder, a test folder outside the project, and a link in them to elsewhere all open`() {
         val ws = Files.createTempDirectory("saffron-mono").toRealPath()
         try {
             for (dir in listOf("shared", "state/reports", "e2e", "secret", "mono", "app", "abs")) Files.createDirectories(ws.resolve(dir))
@@ -163,8 +171,7 @@ class SaffronPluginTest : BasePlatformTestCase() {
             assertEquals(mono.resolve(".saffron/reports/latest.html"), projectFile(mono, ".saffron/reports/latest.html"))
             assertEquals(ws.resolve("e2e/x.feature"), projectFile(ws.resolve("app"), "../e2e/x.feature"))
             assertEquals(ws.resolve("e2e/x.feature"), projectFile(ws.resolve("abs"), "../e2e/x.feature"))
-            // In a trusted folder by its path, out of every trusted folder in fact.
-            assertNull(projectFile(mono, "features/evil/s.txt"))
+            assertEquals(mono.resolve("features/evil/s.txt"), projectFile(mono, "features/evil/s.txt"))
             // Another project's test folder is not this one's.
             assertNull(projectFile(mono, "../e2e/x.feature"))
             // The scan lists the linked test folder's files under their own path.
@@ -200,7 +207,7 @@ class SaffronPluginTest : BasePlatformTestCase() {
         }
     }
 
-    fun `test the scan lists real feature files only, a link counting when it leads to one`() {
+    fun `test the scan lists feature files as the runner walks them, links followed once`() {
         val root = Files.createTempDirectory("saffron-links").toRealPath()
         try {
             Files.createDirectories(root.resolve("features/folder"))
@@ -208,9 +215,14 @@ class SaffronPluginTest : BasePlatformTestCase() {
             Files.createSymbolicLink(root.resolve("features/linked.saffron"), root.resolve("features/a.saffron"))
             Files.createSymbolicLink(root.resolve("features/dangling.feature"), root.resolve("features/nowhere.feature"))
             Files.createSymbolicLink(root.resolve("features/dir.feature"), root.resolve("features/folder"))
-            // A link back up is not followed: no loop, no repeats.
+            // A link back up leads to a folder already walked: no loop, no repeats.
             Files.createSymbolicLink(root.resolve("features/folder/up"), root.resolve("features"))
             assertEquals(listOf("features/a.saffron", "features/linked.saffron"), SaffronProjectScan.scan(root.toString()).files.map { it.relativePath })
+            // A linked folder is followed, as the runner follows it, and a folder reachable both
+            // ways keeps its own path whatever the link is named.
+            Files.writeString(root.resolve("features/folder/b.saffron"), "Feature: B\n")
+            Files.createSymbolicLink(root.resolve("features/aaa"), root.resolve("features/folder"))
+            assertEquals(listOf("features/a.saffron", "features/folder/b.saffron", "features/linked.saffron"), SaffronProjectScan.scan(root.toString()).files.map { it.relativePath })
         } finally {
             root.toFile().deleteRecursively()
         }
