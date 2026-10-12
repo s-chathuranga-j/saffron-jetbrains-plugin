@@ -33,4 +33,4 @@ Source: https://github.com/s-chathuranga-j/saffron-jetbrains-plugin. Bug reports
 
 ## License
 
-Saffron Free Use License v1.0. See [LICENSE](LICENSE).
+Saffron Free Use License v1.0. See [LICENSE](LICENSE), also at https://saffron-ai.io/docs/license. This plugin's source is public to read; the license still applies to it. The Saffron runner's source is closed.
