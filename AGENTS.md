@@ -16,7 +16,8 @@ configurations and the editor.
 ./gradlew runIde             # a sandbox IDE with the plugin
 ```
 
-If Gradle reports a test that no longer exists, delete
+Drop `--offline` on a first build, before Gradle has its dependencies
+cached. If Gradle reports a test that no longer exists, delete
 `build/instrumented` and `build/test-results` and run again.
 
 ## Rules
