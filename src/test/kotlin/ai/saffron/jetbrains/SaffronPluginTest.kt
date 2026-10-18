@@ -7,6 +7,8 @@ import ai.saffron.jetbrains.ui.RunNode
 import ai.saffron.jetbrains.ui.ProposalsTab
 import ai.saffron.jetbrains.ui.SaffronStatusService
 import ai.saffron.jetbrains.ui.StatusAttention
+import ai.saffron.jetbrains.ui.ProjectStatus
+import ai.saffron.jetbrains.ui.StatusLastRun
 import ai.saffron.jetbrains.ui.StatusProposal
 import ai.saffron.jetbrains.ui.attentionTooltip
 import ai.saffron.jetbrains.ui.checkedCopy
@@ -633,6 +635,10 @@ class SaffronPluginTest : BasePlatformTestCase() {
     fun `test a browser matrix row says its browser and its replay opens that browser alone`() {
         val webkit = StatusAttention(feature = "features/a.saffron", scenario = "A", browser = "webkit")
         assertEquals("A · webkit", ai.saffron.jetbrains.ui.attentionLabel(webkit, matrix = true))
+        // A run the Stop button cut short never reads as everything passed.
+        val stopped = ProjectStatus(lastRun = StatusLastRun(attention = emptyList(), interrupted = true, notRun = 4))
+        assertEquals("Run interrupted: 4 scenario(s) did not run, and count as neither passed nor failed", ai.saffron.jetbrains.ui.lastRunEmptyText(stopped))
+        assertEquals("Everything passed: 0 green in the last run", ai.saffron.jetbrains.ui.lastRunEmptyText(ProjectStatus(lastRun = StatusLastRun(attention = emptyList()))))
         assertEquals("A", ai.saffron.jetbrains.ui.attentionLabel(webkit, matrix = false))
         assertEquals("features/a.saffron:A@webkit", ai.saffron.jetbrains.ui.attentionTraceSelector(webkit))
         assertEquals("features/a.saffron:A", ai.saffron.jetbrains.ui.attentionTraceSelector(StatusAttention(feature = "features/a.saffron", scenario = "A")))

@@ -179,6 +179,9 @@ class StatusLastRun(
     val attention: List<StatusAttention>? = null,
     /** Set when the run's rows span several browsers (a browser matrix): rows are labelled by browser then. */
     val browsers: List<String>? = null,
+    /** Set when Ctrl-C (or the Stop button) cut the run short: [notRun] of its scenarios did not run, and count as neither passed nor failed. */
+    val interrupted: Boolean = false,
+    val notRun: Int? = null,
 )
 
 /** [passRate]: the runner's, where a heal whose proof failed does not pass; null from a runner before 0.9.8. */

@@ -33,6 +33,19 @@ internal class Screenshot(val file: VirtualFile? = null, val problem: String? = 
  * full-page picture, to freeze the IDE, so it is never run on the UI thread.
  */
 /** A browser matrix lists a scenario once per browser: the label says which. */
+/** What the tab says when it lists no scenario. An interrupted run never reads as everything passed. */
+internal fun lastRunEmptyText(status: ProjectStatus?): String {
+    val run = status?.lastRun
+    return when {
+        status == null -> "Loading…"
+        run == null -> "No run yet"
+        // Saying "everything passed" would be a claim this data cannot support.
+        run.attention == null -> "Update saffron-ai to the release with failure screenshots"
+        run.interrupted -> "Run interrupted: ${run.notRun ?: "some"} scenario(s) did not run, and count as neither passed nor failed"
+        else -> "Everything passed: ${run.totals.green} green in the last run"
+    }
+}
+
 internal fun attentionLabel(a: StatusAttention, matrix: Boolean): String =
     if (matrix && a.browser != null) "${a.scenario} · ${a.browser}" else a.scenario
 
@@ -149,12 +162,10 @@ class LastRunTab(project: Project, parent: Disposable) : StatusTab(project, pare
         // Runners before 0.9.1 have no --run and would refuse the command itself.
         shownRun = run?.startedAt?.takeIf { it.isNotBlank() && runnerAtLeast(status?.version ?: "", 0, 9, 1) }
         val attention = run?.attention
-        tree.emptyText.text = when {
-            status == null -> "Loading…"
-            run == null -> "No run yet"
-            // Saying "everything passed" would be a claim this data cannot support.
-            attention == null -> "Update saffron-ai to the release with failure screenshots"
-            else -> "Everything passed: ${run.totals.green} green in the last run"
+        tree.emptyText.text = lastRunEmptyText(status)
+        // Cut short with scenarios listed: the tree says so above them.
+        if (run != null && run.interrupted && !attention.isNullOrEmpty()) {
+            root.add(DefaultMutableTreeNode(RunRow("Run interrupted", "${run.notRun ?: "some"} not run", AllIcons.Actions.Suspend)))
         }
         for ((state, label, icon) in listOf(
             Triple("red", "Failed", AllIcons.General.Error),
