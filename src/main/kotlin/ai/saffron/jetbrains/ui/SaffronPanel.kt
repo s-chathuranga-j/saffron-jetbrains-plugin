@@ -242,10 +242,7 @@ class SaffronPanel(private val project: Project, parent: Disposable) : SimpleToo
         val checked = all.filter { list.isItemSelected(it) }.map { it.relativePath }.toSet()
         all = s.files
         applyFilter(checked)
-        status.text = s.lastRun?.let { r ->
-            val cost = r.costUsd?.let { "$" + "%.2f".format(it) } ?: "cost not reported"
-            "Last run: ${r.green} passed · ${r.yellow} pending review · ${r.red} failed · $cost${ago(r.finishedAt)}"
-        } ?: "No runs yet."
+        status.text = s.lastRun?.let { it.summary(ago(it.finishedAt)) } ?: "No runs yet."
         // The status knows unreadable proposals too; the file count is the fallback until it loads.
         val pendingCount = pendingFromStatus ?: s.pendingProposals
         pending.text = when (pendingCount) {

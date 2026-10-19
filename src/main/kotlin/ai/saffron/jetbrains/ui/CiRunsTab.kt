@@ -149,6 +149,9 @@ class RunView(
     val reasonKind: String? = null,
     val reason: String? = null,
     val totals: CiTotals? = null,
+    /** Set when the run was cut short: [notRun] of its scenarios did not run, and count as neither passed nor failed. */
+    val interrupted: Boolean = false,
+    val notRun: Int? = null,
     /** Set when the run's rows span several browsers (a browser matrix): rows are labelled by browser then. */
     val browsers: List<String>? = null,
     val scenarios: List<CiScenario> = emptyList(),
@@ -257,7 +260,14 @@ internal fun viewRows(view: RunView?, problem: String?, version: String? = null,
     val rows = view.warnings.map { row(it, "", AllIcons.General.Warning, tooltipHtml(it)) }.toMutableList()
     view.totals?.let { t ->
         val cost = listOfNotNull(t.aiCalls?.let { "$it AI call${if (it == 1) "" else "s"}" }, t.costUsd?.takeIf { it > 0 }?.let { "$" + "%.2f".format(it) }).joinToString(" · ")
-        rows += row("${t.red} failed · ${t.yellow} pending review · ${t.green} passed", cost, AllIcons.General.Information)
+        // A run cut short never reads as a finished one.
+        val stopped = if (view.interrupted) "Run interrupted (${view.notRun ?: "some"} not run): " else ""
+        rows += row(
+            "$stopped${t.red} failed · ${t.yellow} pending review · ${t.green} passed",
+            cost,
+            if (view.interrupted) AllIcons.Actions.Suspend else AllIcons.General.Information,
+            if (view.interrupted) tooltipHtml("The run was interrupted: the scenarios it did not run count as neither passed nor failed.") else null,
+        )
     }
     for (status in listOf("red", "yellow")) {
         for (s in view.scenarios.filter { it.status == status }) {

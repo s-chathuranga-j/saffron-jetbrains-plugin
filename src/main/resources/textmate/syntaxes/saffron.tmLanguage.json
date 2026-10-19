@@ -136,8 +136,17 @@
       ]
     },
     "argument": {
-      "match": "\"[^\"]*\"",
-      "name": "string.quoted.double.argument.saffron"
+      "begin": "\"",
+      "end": "\"|(?=$)",
+      "name": "string.quoted.double.argument.saffron",
+      "patterns": [
+        {
+          "include": "#placeholder"
+        },
+        {
+          "include": "#token"
+        }
+      ]
     },
     "placeholder": {
       "match": "<[^<>\\s]+>",

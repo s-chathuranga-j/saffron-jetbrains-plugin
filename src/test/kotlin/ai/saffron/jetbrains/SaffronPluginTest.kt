@@ -183,6 +183,23 @@ class SaffronPluginTest : BasePlatformTestCase() {
         }
     }
 
+    fun `test the panel's last run line says a run was interrupted, never as a finished one`() {
+        val root = Files.createTempDirectory("saffron-stopped").toRealPath()
+        try {
+            Files.createDirectories(root.resolve(".saffron/reports"))
+            Files.writeString(root.resolve("saffron.config.json"), "{}")
+            Files.writeString(
+                root.resolve(".saffron/reports/latest.json"),
+                """{"interrupted":true,"notRun":4,"totals":{"green":2,"yellow":0,"red":0,"costUsd":0,"aiCalls":0}}""",
+            )
+            assertEquals("Run interrupted (4 not run): 2 passed · 0 pending review · 0 failed · $0.00", SaffronProjectScan.scan(root.toString()).lastRun?.summary(""))
+            Files.writeString(root.resolve(".saffron/reports/latest.json"), """{"totals":{"green":2,"yellow":0,"red":1,"costUsd":0,"aiCalls":0}}""")
+            assertEquals("Last run: 2 passed · 0 pending review · 1 failed · $0.00", SaffronProjectScan.scan(root.toString()).lastRun?.summary(""))
+        } finally {
+            root.toFile().deleteRecursively()
+        }
+    }
+
     fun `test the Files list is scanned again when the status reports another test folder`() {
         val root = Files.createTempDirectory("saffron-moved").toRealPath()
         try {
@@ -588,6 +605,9 @@ class SaffronPluginTest : BasePlatformTestCase() {
         assertEquals("The results page arrives with saffron-ai 1.0.0; this project has 0.9.9.", ai.saffron.jetbrains.ui.panelNeedsRunner("0.9.9"))
         assertEquals("The results page arrives with saffron-ai 1.0.0.", ai.saffron.jetbrains.ui.panelNeedsRunner(null))
         fun totals(json: String) = (viewRows(Gson().fromJson("""{"bundle":{},"totals":$json}""", RunView::class.java), null)[0].userObject as RunNode).detail
+        fun totalsLabel(view: String) = (viewRows(Gson().fromJson(view, RunView::class.java), null)[0].userObject as RunNode).label
+        assertEquals("Run interrupted (3 not run): 0 failed · 0 pending review · 2 passed", totalsLabel("""{"bundle":{},"interrupted":true,"notRun":3,"totals":{"green":2}}"""))
+        assertEquals("0 failed · 0 pending review · 2 passed", totalsLabel("""{"bundle":{},"totals":{"green":2}}"""))
         assertEquals("3 AI calls", totals("""{"aiCalls":3,"costUsd":0}"""))
         assertEquals("3 AI calls · $0.25", totals("""{"aiCalls":3,"costUsd":0.25}"""))
     }

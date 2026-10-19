@@ -21,7 +21,23 @@ data class SaffronFile(val relativePath: String, val scenarios: Int, val stepSet
 
 /** Totals of the latest run, from `.saffron/reports/latest.json`. */
 /** [costUsd] is null when the provider reports no price (Codex, Antigravity, Cursor): never a measured $0. */
-data class LastRun(val green: Int, val yellow: Int, val red: Int, val costUsd: Double?, val finishedAt: Instant?)
+data class LastRun(
+    val green: Int,
+    val yellow: Int,
+    val red: Int,
+    val costUsd: Double?,
+    val finishedAt: Instant?,
+    /** Cut short (Ctrl-C, Stop): [notRun] of its scenarios did not run, neither passed nor failed. */
+    val interrupted: Boolean = false,
+    val notRun: Int? = null,
+) {
+    /** The panel's line: an interrupted run never reads as a finished one. */
+    fun summary(ago: String): String {
+        val cost = costUsd?.let { "$" + "%.2f".format(it) } ?: "cost not reported"
+        val stopped = if (interrupted) "Run interrupted (${notRun ?: "some"} not run): " else "Last run: "
+        return "$stopped$green passed · $yellow pending review · $red failed · $cost$ago"
+    }
+}
 
 data class SaffronProjectState(
     val files: List<SaffronFile>,
@@ -159,6 +175,8 @@ object SaffronProjectScan {
                 // The runner's rule: AI work with no dollar figure is "not reported".
                 costUsd = (t.get("costUsd")?.asDouble ?: 0.0).takeIf { it > 0 || (t.get("aiCalls")?.asInt ?: 0) == 0 },
                 finishedAt = root.get("finishedAt")?.asString?.let { runCatching { Instant.parse(it) }.getOrNull() },
+                interrupted = root.get("interrupted")?.asBoolean == true,
+                notRun = root.get("notRun")?.takeIf { it.isJsonPrimitive }?.asInt,
             )
         }.getOrNull()
     }
