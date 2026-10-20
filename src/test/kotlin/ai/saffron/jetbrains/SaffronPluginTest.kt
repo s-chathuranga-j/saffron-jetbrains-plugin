@@ -493,6 +493,10 @@ class SaffronPluginTest : BasePlatformTestCase() {
             Files.writeString(imported, """{"proposals":[{"file":".saffron/proposals/login-saffron/sign-in.json","feature":"features/login.saffron","scenario":"Sign in","outcome":"unchanged"}]}""")
             importRun.actionPerformed(TestActionEvent.createTestEvent(importRun))
             PlatformTestUtil.waitWithEventsDispatching("no re-import summary", { note.text == "Already imported: nothing changed for e2e #20261001.41." }, 60)
+            // A run that filed no proposal, its report imported: never "0 proposals ready for review".
+            Files.writeString(imported, """{"proposals":[],"evidence":{"written":2,"unchanged":0},"report":"written"}""")
+            importRun.actionPerformed(TestActionEvent.createTestEvent(importRun))
+            PlatformTestUtil.waitWithEventsDispatching("no report-only summary", { note.text == "No new proposals from e2e #20261001.41; its report is now the last run." }, 60)
             // A refusal: the reason, under the run and in the note.
             Files.writeString(imported, """{"error":"the bundle is from another repository"}""")
             importRun.actionPerformed(TestActionEvent.createTestEvent(importRun))
@@ -1057,5 +1061,57 @@ class SaffronPluginTest : BasePlatformTestCase() {
         assertEquals(listOf("trace", "features/a.saffron", "Sign in\nwith a newline", "firefox"), ai.saffron.jetbrains.ui.parseAction("[\"trace\",\"features/a.saffron\",\"Sign in\\nwith a newline\",\"firefox\"]"))
         assertEquals(listOf("import", "", "", ""), ai.saffron.jetbrains.ui.parseAction("[\"import\"]"))
         assertEquals(listOf("", "", "", ""), ai.saffron.jetbrains.ui.parseAction("not json"))
+    }
+
+    fun `test Last Run calls its yellow rows pending review, not healed`() {
+        if (SystemInfo.isWindows) return
+        val base = Path.of(project.basePath!!)
+        try {
+            standInCases(base, """  *) echo '{"packageInstalled":true,"lastRun":{"totals":{"scenarios":1,"yellow":1},"attention":[{"feature":"features/a.saffron","scenario":"First","baseScenario":"First","status":"yellow","evidence":[]}]}}' ;;""")
+            val tab = LastRunTab(project, testRootDisposable)
+            val tree = UIUtil.findComponentOfType(tab, Tree::class.java)!!
+            fun groups() = (tree.model.root as DefaultMutableTreeNode).children().toList().map { it.toString() }
+            PlatformTestUtil.waitWithEventsDispatching("the status never loaded", { groups().isNotEmpty() }, 60)
+            assertEquals(listOf("Pending review"), groups())
+        } finally {
+            base.resolve("node_modules").toFile().deleteRecursively()
+        }
+    }
+
+    fun `test the Files search keeps a tick on a file it hides`() {
+        // The stand-in status is a shell script.
+        if (SystemInfo.isWindows) return
+        val base = Path.of(project.basePath!!)
+        try {
+            standInCases(base, "")
+            Files.createDirectories(base.resolve("features"))
+            Files.writeString(base.resolve("saffron.config.json"), "{}")
+            Files.writeString(base.resolve("features/a.saffron"), "Feature: A\n")
+            Files.writeString(base.resolve("features/b.saffron"), "Feature: B\n")
+            SaffronStatusService.getInstance(project).discoverRoots()
+            val panel = ai.saffron.jetbrains.ui.SaffronPanel(project, testRootDisposable)
+            @Suppress("UNCHECKED_CAST")
+            val list = UIUtil.findComponentOfType(panel, CheckBoxList::class.java) as CheckBoxList<ai.saffron.jetbrains.ui.SaffronFile>
+            PlatformTestUtil.waitWithEventsDispatching("the files never loaded", { list.itemsCount == 2 }, 60)
+            list.setItemSelected(list.getItemAt(0), true)
+            val search = UIUtil.findComponentOfType(panel, com.intellij.ui.SearchTextField::class.java)!!
+            search.text = "b.saffron"
+            assertEquals(listOf("features/b.saffron"), (0 until list.itemsCount).map { list.getItemAt(it)!!.relativePath })
+            search.text = ""
+            assertEquals(listOf(true, false), (0 until list.itemsCount).map { list.isItemSelected(it) })
+        } finally {
+            Files.deleteIfExists(base.resolve("saffron.config.json"))
+            base.resolve("features").toFile().deleteRecursively()
+            base.resolve("node_modules").toFile().deleteRecursively()
+        }
+    }
+
+    fun `test Run Tagged only passes tags --filter reads as one token`() {
+        assertTrue(ai.saffron.jetbrains.ui.filterableTag("@smoke"))
+        assertTrue(ai.saffron.jetbrains.ui.filterableTag("@issue(42)"))
+        assertFalse(ai.saffron.jetbrains.ui.filterableTag("@a,b"))
+        assertFalse(ai.saffron.jetbrains.ui.filterableTag("@a|b"))
+        assertFalse(ai.saffron.jetbrains.ui.filterableTag("@a b"))
+        assertFalse(ai.saffron.jetbrains.ui.filterableTag("@a)"))
     }
 }

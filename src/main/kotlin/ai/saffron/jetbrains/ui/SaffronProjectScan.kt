@@ -1,5 +1,6 @@
 package ai.saffron.jetbrains.ui
 
+import ai.saffron.jetbrains.run.SaffronCommand
 import com.google.gson.JsonParser
 import java.nio.file.Files
 import java.nio.file.LinkOption
@@ -59,7 +60,6 @@ object SaffronProjectScan {
     internal val SKIP_DIRS = setOf("node_modules", ".git", ".saffron", "dist", "build", "target", ".idea")
     /** The runner's SKIPPED_DIRS: every other file in the test folder is one it runs, so one listed and runnable here. */
     internal val RUNNER_SKIP_DIRS = setOf(".saffron", "node_modules", ".git")
-    private val SCENARIO = Regex("^\\s*(Scenario( Outline| Template)?|Example):")
     private val STEP_SET = Regex("^\\s*StepSet:")
 
     fun isSaffronProject(basePath: String?): Boolean {
@@ -109,7 +109,7 @@ object SaffronProjectScan {
             files = files,
             lastRun = readLastRun(reports),
             pendingProposals = countProposals(base.resolve(".saffron/proposals")),
-            packageInstalled = Files.isDirectory(base.resolve("node_modules/saffron-ai")),
+            packageInstalled = SaffronCommand.installedPackage(base.toString()) != null,
             hasReport = Files.exists(base.resolve(".saffron/reports/latest.html")),
             featuresDir = features,
         )
@@ -151,16 +151,54 @@ object SaffronProjectScan {
     }
 
     private fun describe(base: Path, file: Path): SaffronFile {
+        val lines = runCatching { Files.readAllLines(file) }.getOrDefault(emptyList())
+        val (scenarios, sets) = count(lines)
+        return SaffronFile(base.relativize(file).toString().replace('\\', '/'), scenarios, sets)
+    }
+
+    /** Scenarios (in the file's Gherkin language) and step sets of a file's [lines], doc strings left out. */
+    internal fun count(lines: List<String>): Pair<Int, Int> {
+        val keywords = SCENARIO_KEYWORDS[languageOf(lines)] ?: SCENARIO_KEYWORDS["en"].orEmpty()
+        val scenario = keywords.take(2).flatten()
+        val inDocstring = docstringMask(lines)
         var scenarios = 0
         var sets = 0
+        lines.forEachIndexed { i, line ->
+            if (inDocstring[i]) return@forEachIndexed
+            val trimmed = line.trim()
+            if (scenario.any { trimmed.startsWith("$it:") }) scenarios++ else if (STEP_SET.containsMatchIn(line)) sets++
+        }
+        return scenarios to sets
+    }
+
+    /**
+     * Each language's Scenario, Scenario Outline and Examples keywords, from the Gherkin the
+     * runner parses with (a copy of the VS Code extension's assets/scenario-keywords.json).
+     */
+    private val SCENARIO_KEYWORDS: Map<String, List<List<String>>> by lazy {
         runCatching {
-            Files.newBufferedReader(file).useLines { lines ->
-                for (line in lines) {
-                    if (SCENARIO.containsMatchIn(line)) scenarios++ else if (STEP_SET.containsMatchIn(line)) sets++
-                }
+            val text = SaffronProjectScan::class.java.getResourceAsStream("/scenario-keywords.json")!!.use { String(it.readAllBytes(), Charsets.UTF_8) }
+            com.google.gson.Gson().fromJson<Map<String, List<List<String>>>>(text, object : com.google.gson.reflect.TypeToken<Map<String, List<List<String>>>>() {}.type)
+        }.getOrNull() ?: mapOf("en" to listOf(listOf("Example", "Scenario"), listOf("Scenario Outline", "Scenario Template"), listOf("Examples", "Scenarios")))
+    }
+
+    /** A file's `# language: fr`, a comment above everything else, as the runner's parser reads it. */
+    internal fun languageOf(lines: List<String>): String? =
+        lines.takeWhile { it.isBlank() || it.trim().startsWith("#") }
+            .firstNotNullOfOrNull { Regex("^\\s*#\\s*language\\s*:\\s*([\\w-]+)").find(it)?.groupValues?.get(1) }
+
+    /** Per line, whether it sits inside a """ or ``` doc string (fence lines included). */
+    internal fun docstringMask(lines: List<String>): List<Boolean> {
+        var fence: String? = null
+        return lines.map { line ->
+            val marker = listOf("\"\"\"", "```").firstOrNull { line.trimStart().startsWith(it) }
+            if (marker != null && (fence == null || fence == marker)) {
+                fence = if (fence == null) marker else null
+                true
+            } else {
+                fence != null
             }
         }
-        return SaffronFile(base.relativize(file).toString().replace('\\', '/'), scenarios, sets)
     }
 
     private fun readLastRun(report: Path): LastRun? {

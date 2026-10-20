@@ -1,5 +1,6 @@
 package ai.saffron.jetbrains.run
 
+import com.google.gson.JsonParser
 import com.intellij.execution.configurations.GeneralCommandLine
 import com.intellij.openapi.project.Project
 import com.intellij.openapi.util.SystemInfo
@@ -10,7 +11,8 @@ import java.nio.file.Path
 /**
  * Builds `saffron` command lines the same way for every entry point (run
  * configurations, the tool window, the language server): the project-local
- * binary when `saffron-ai` is installed, `npx -p saffron-ai saffron` otherwise.
+ * binary when `saffron-ai` is installed (here or in a folder above, up to the
+ * IDE project), `npx -p saffron-ai@<declared range> saffron` otherwise.
  */
 object SaffronCommand {
 
@@ -33,10 +35,55 @@ object SaffronCommand {
             ?.takeIf { java.lang.reflect.Modifier.isStatic(it.modifiers) }
     }
 
-    fun localBinary(basePath: String?): Path? {
-        val p = basePath?.let { Path.of(it, "node_modules", ".bin", if (SystemInfo.isWindows) "saffron.cmd" else "saffron") }
-        return if (p != null && Files.isExecutable(p)) p else null
+    /**
+     * The folders Node looks in for [basePath]'s packages: [basePath], then each one up to
+     * [top] (the IDE project holding it), never above. Outside [top], [basePath] alone.
+     */
+    fun upward(basePath: String?, top: String? = topOf(basePath)): List<Path> {
+        val start = basePath?.let { Path.of(it).toAbsolutePath().normalize() } ?: return emptyList()
+        val stop = top?.let { Path.of(it).toAbsolutePath().normalize() }?.takeIf { start.startsWith(it) } ?: return listOf(start)
+        return generateSequence(start) { dir -> dir.parent?.takeIf { dir != stop } }.toList()
     }
+
+    /** The open IDE project's folder that holds [basePath]. */
+    private fun topOf(basePath: String?): String? = basePath?.let { path ->
+        runCatching { com.intellij.openapi.project.ProjectManager.getInstance().openProjects }.getOrNull().orEmpty()
+            .mapNotNull { it.basePath }.filter { com.intellij.openapi.util.io.FileUtil.isAncestor(it, path, false) }.minByOrNull { it.length }
+    }
+
+    /** The project's own `saffron` binary: the nearest install, from [basePath] up to [top]. */
+    fun localBinary(basePath: String?, top: String? = topOf(basePath)): Path? =
+        upward(basePath, top).map { it.resolve("node_modules/.bin/" + if (SystemInfo.isWindows) "saffron.cmd" else "saffron") }.firstOrNull(Files::isExecutable)
+
+    /** The nearest saffron-ai install, from [basePath] up to [top], as Node resolves it; null without one. */
+    fun installedPackage(basePath: String?, top: String? = topOf(basePath)): Path? =
+        upward(basePath, top).map { it.resolve("node_modules/saffron-ai") }.firstOrNull(Files::isDirectory)
+
+    /** The version of [installedPackage]; null without one, or without a readable version. */
+    fun installedVersion(basePath: String?, top: String? = topOf(basePath)): String? =
+        installedPackage(basePath, top)?.let { pkg ->
+            runCatching { JsonParser.parseString(Files.readString(pkg.resolve("package.json"))).asJsonObject.get("version").asString }.getOrNull()
+        }
+
+    /**
+     * What npx runs without an install: the saffron-ai the nearest package.json declares
+     * (devDependencies, then dependencies), so a clone not yet installed runs the version it
+     * was written for. A spec npx cannot take from here (file:, git, workspace:), or none,
+     * leaves it unpinned.
+     */
+    fun npxPackage(basePath: String?, top: String? = topOf(basePath)): String {
+        for (dir in upward(basePath, top)) {
+            val pkg = runCatching { JsonParser.parseString(Files.readString(dir.resolve("package.json"))).asJsonObject }.getOrNull() ?: continue
+            val spec = listOf("devDependencies", "dependencies").firstNotNullOfOrNull { key ->
+                runCatching { pkg.getAsJsonObject(key)?.get("saffron-ai")?.asString }.getOrNull()?.trim()?.takeIf { it.isNotEmpty() }
+            } ?: continue
+            return if (NPX_RANGE.matches(spec)) "saffron-ai@$spec" else "saffron-ai"
+        }
+        return "saffron-ai"
+    }
+
+    /** A range npm reads (^1.0.0, 0.9.*, >=0.9 <1), wildcards included. */
+    private val NPX_RANGE = Regex("[\\w.^~<>=|* -]+")
 
     /** `saffron` with no sub-command yet; working directory = the project. */
     fun base(basePath: String?, local: Path? = localBinary(basePath)): GeneralCommandLine {
@@ -45,7 +92,7 @@ object SaffronCommand {
         } else {
             // "saffron" alone would resolve an unrelated npm package; the binary
             // lives in saffron-ai, so pin the package explicitly.
-            GeneralCommandLine(if (SystemInfo.isWindows) "npx.cmd" else "npx", "-y", "-p", "saffron-ai", "saffron")
+            GeneralCommandLine(if (SystemInfo.isWindows) "npx.cmd" else "npx", "-y", "-p", npxPackage(basePath), "saffron")
         }
         if (basePath != null) command.withWorkDirectory(basePath)
         // The login-shell environment, so Node from nvm/Homebrew is found even

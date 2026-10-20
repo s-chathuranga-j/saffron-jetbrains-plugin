@@ -160,7 +160,7 @@ class ProposalsTab(project: Project, parent: Disposable) : StatusTab(project, pa
         toolbar = toolbar(
             action("Accept Selected", "saffron accept <ticked files>", AllIcons.Actions.Commit) { act("accept", ticked()) },
             action("Reject Selected", "saffron reject <ticked files>", AllIcons.Actions.Cancel) { act("reject", ticked()) },
-            action("Accept All", "saffron accept --all (UNVERIFIED proposals are skipped)", AllIcons.Actions.Checked) { acceptAll() },
+            action("Accept All", "saffron accept --all (skips proposals that are unverified, not checked or imported from CI)", AllIcons.Actions.Checked) { acceptAll() },
             action("Refresh", "Reload the status", AllIcons.Actions.Refresh) { refreshStatus() },
         )
         list.setEmptyText("No proposals pending review")
@@ -338,11 +338,15 @@ class TagsTab(project: Project, parent: Disposable) : StatusTab(project, parent)
     }
 
     private fun run() {
-        val tags = items.filter { list.isItemSelected(it) }.map { it.tag }
-        if (tags.isEmpty()) {
+        val ticked = items.filter { list.isItemSelected(it) }.map { it.tag }
+        if (ticked.isEmpty()) {
             note.text = "Tick one or more tags first."
             return
         }
+        val tags = ticked.filter(::filterableTag)
+        note.text = (ticked - tags.toSet()).takeIf { it.isNotEmpty() }
+            ?.let { "Skipped ${it.joinToString(", ")}: --filter cannot name a tag with a comma, pipe, space or stray parenthesis." } ?: ""
+        if (tags.isEmpty()) return
         SaffronRunner.execute(project, "Saffron: run ${tags.joinToString(",")}") {
             it.command = "run"
             it.paths = ""
@@ -352,3 +356,6 @@ class TagsTab(project: Project, parent: Disposable) : StatusTab(project, parent)
         }
     }
 }
+
+/** A tag --filter reads as one token (the runner's tokenizer): `@issue(42)` is fine, `@a,b` or `@a|b` is not. */
+internal fun filterableTag(tag: String): Boolean = Regex("[^\\s(),|]+(?:\\([^\\s(),|]*\\))*").matches(tag)

@@ -27,7 +27,7 @@ class SaffronSettingsEditor : SettingsEditor<SaffronRunConfiguration>() {
     private val panel: JPanel = FormBuilder.createFormBuilder()
         .addLabeledComponent("Command:", command)
         .addLabeledComponent(pathsLabel, paths)
-        .addTooltip("Relative to the project root, separated by spaces; put a path that contains a space in double quotes. run: feature files or folders, blank runs everything under features/. accept / reject: proposal files, blank means --all. trace: one scenario name, or feature:scenario, quotes optional; blank opens every traced scenario. login: the provider (claude, codex, antigravity or cursor), blank checks the configured one.")
+        .addTooltip("Relative to the project root, separated by spaces; put a path that contains a space in double quotes. run: feature files or folders, blank runs the configured test folder (features in saffron.config.json). accept / reject: proposal files, blank means --all. trace: one scenario name, or feature:scenario, quotes optional; blank opens every traced scenario. login: the provider (claude, codex, antigravity or cursor), blank checks the configured one.")
         .addLabeledComponent("Tags:", tags)
         .addTooltip("A list of tags, any of which runs a scenario (for example @smoke,@checkout), or an expression (for example \"@e2e and not @wip\").")
         .addComponent(replayOnly)

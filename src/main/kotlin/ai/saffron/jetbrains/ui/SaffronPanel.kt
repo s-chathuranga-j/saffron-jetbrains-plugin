@@ -59,6 +59,8 @@ class SaffronPanel(private val project: Project, parent: Disposable) : SimpleToo
     private val hint = JBLabel()
     private val refreshAlarm = Alarm(Alarm.ThreadToUse.SWING_THREAD, parent)
     private var all: List<SaffronFile> = emptyList()
+    /** The ticked files' paths, kept while the search hides them. */
+    private val checked = mutableSetOf<String>()
     private var state: SaffronProjectState? = null
     /** Pending review from the status: listed proposals plus unreadable ones; null until it loads. */
     private var pendingFromStatus: Int? = null
@@ -119,7 +121,7 @@ class SaffronPanel(private val project: Project, parent: Disposable) : SimpleToo
             action("Run All", "saffron run over every feature file", AllIcons.Actions.RunAll) { runAll() },
             action("Run Selected", "saffron run over the checked files", AllIcons.Actions.Execute) { runSelected() },
             action("Open Report", "Open the latest HTML report in the browser", AllIcons.Actions.Preview) { openReport() },
-            action("Accept All Proposals", "saffron accept --all: promote pending proposals to committed caches", AllIcons.Actions.Commit) { acceptAll() },
+            action("Accept All Proposals", "saffron accept --all: promote pending proposals to committed caches, except unverified, not checked and CI-imported ones", AllIcons.Actions.Commit) { acceptAll() },
             action("Refresh", "Rescan feature files and the latest report", AllIcons.Actions.Refresh) { refresh() },
         )
         val toolbar = ActionManager.getInstance().createActionToolbar("SaffronToolWindow", group, true)
@@ -171,7 +173,8 @@ class SaffronPanel(private val project: Project, parent: Disposable) : SimpleToo
             hint.text = scanError ?: "Still loading this project's files: try again in a moment."
             return
         }
-        val selected = all.filter { list.isItemSelected(it) }
+        syncTicks()
+        val selected = all.filter { it.relativePath in checked }
         if (selected.isEmpty()) {
             hint.text = "Tick one or more files first, or use Run All."
             return
@@ -213,6 +216,7 @@ class SaffronPanel(private val project: Project, parent: Disposable) : SimpleToo
             // Another project chosen: drop the last one's files and ticks until its scan lands.
             state = null
             all = emptyList()
+            checked.clear()
             shownRoot = null
             list.clear()
         }
@@ -239,9 +243,11 @@ class SaffronPanel(private val project: Project, parent: Disposable) : SimpleToo
 
     private fun show(s: SaffronProjectState) {
         state = s
-        val checked = all.filter { list.isItemSelected(it) }.map { it.relativePath }.toSet()
+        syncTicks()
         all = s.files
-        applyFilter(checked)
+        // A file gone from the project takes its tick with it.
+        checked.retainAll(all.map { it.relativePath }.toSet())
+        applyFilter()
         status.text = s.lastRun?.let { it.summary(ago(it.finishedAt)) } ?: "No runs yet."
         // The status knows unreadable proposals too; the file count is the fallback until it loads.
         val pendingCount = pendingFromStatus ?: s.pendingProposals
@@ -253,7 +259,16 @@ class SaffronPanel(private val project: Project, parent: Disposable) : SimpleToo
         hint.text = if (s.packageInstalled) "" else "saffron-ai is not installed here: runs fall back to npx. Run npm i -D saffron-ai."
     }
 
-    private fun applyFilter(keepChecked: Set<String> = all.filter { list.isItemSelected(it) }.map { it.relativePath }.toSet()) {
+    /** The shown files' ticks into [checked]; files the search hides keep theirs. */
+    private fun syncTicks() {
+        for (i in 0 until list.itemsCount) {
+            val f = list.getItemAt(i) ?: continue
+            if (list.isItemSelected(f)) checked += f.relativePath else checked -= f.relativePath
+        }
+    }
+
+    private fun applyFilter() {
+        syncTicks()
         val q = search.text.trim().lowercase()
         list.clear()
         for (f in all) {
@@ -263,7 +278,7 @@ class SaffronPanel(private val project: Project, parent: Disposable) : SimpleToo
                 f.scenarios == 1 -> "${f.relativePath}   1 scenario"
                 else -> "${f.relativePath}   ${f.scenarios} scenarios"
             }
-            list.addItem(f, label, f.relativePath in keepChecked)
+            list.addItem(f, label, f.relativePath in checked)
         }
     }
 

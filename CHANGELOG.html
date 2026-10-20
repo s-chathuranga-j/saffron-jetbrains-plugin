@@ -4,6 +4,15 @@
   <li>A date range token such as <code>{date+7 - +9:MMM D, YYYY}</code> is highlighted as a parameter, like <code>{date+7:D. MMM:de-DE}</code>.</li>
   <li>The Saffron panel's last-run line and a CI run's totals say "Run interrupted (N not run)" for a run cut short, never as a finished run.</li>
   <li>A <code>{date...}</code> or <code>&lt;column&gt;</code> inside a quoted argument is highlighted as a parameter, not as part of the string.</li>
+  <li>Right-click Run on a scenario whose name the file has twice runs that scenario, by its line, instead of the first one of that name.</li>
+  <li>An install of <code>saffron-ai</code> in a folder above the Saffron project (a monorepo's root, up to the IDE project) is used, as Node finds it. Without one, <code>npx</code> runs the version range <code>package.json</code> declares instead of the newest.</li>
+  <li>Accept All says what <code>saffron accept --all</code> leaves out: proposals that are unverified, not checked or imported from a CI run.</li>
+  <li>Run Tagged skips, and names, a tag <code>--filter</code> cannot take as one tag (a comma, pipe, space or stray parenthesis), instead of running it as an expression.</li>
+  <li>A ticked file in the Files tab stays ticked while the search hides it.</li>
+  <li>Scenario counts in the Files tab read the file's Gherkin language (<code># language: it</code>) and no longer count a <code>Scenario:</code> line inside a doc string.</li>
+  <li>Yellow rows in Last Run are grouped as "Pending review" (healed, a first recording or a proposal not yet verified).</li>
+  <li>Importing a CI run that filed no proposal says "No new proposals from ...; its report is now the last run" instead of "0 proposals ready for review".</li>
+  <li>The run configuration's Paths tooltip says a blank field runs the configured test folder.</li>
 </ul>
 <h3>0.7.0</h3>
 <ul>

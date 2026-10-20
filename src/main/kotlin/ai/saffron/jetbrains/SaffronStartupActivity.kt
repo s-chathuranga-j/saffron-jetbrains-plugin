@@ -1,5 +1,6 @@
 package ai.saffron.jetbrains
 
+import ai.saffron.jetbrains.run.SaffronCommand
 import ai.saffron.jetbrains.ui.SaffronStatusService
 import com.intellij.ide.util.PropertiesComponent
 import com.intellij.notification.NotificationGroupManager
@@ -35,7 +36,7 @@ class SaffronStartupActivity : ProjectActivity {
             )
             return
         }
-        if (roots.none { Files.isDirectory(it.resolve("node_modules/saffron-ai")) }) {
+        if (roots.none { SaffronCommand.installedPackage(it.toString(), project.basePath) != null }) {
             hintOnce(
                 project,
                 HINT_SHOWN_KEY,

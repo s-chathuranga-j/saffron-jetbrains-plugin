@@ -23,6 +23,7 @@ import com.intellij.openapi.actionSystem.ActionPlaces
 import com.intellij.openapi.actionSystem.CommonDataKeys
 import com.intellij.openapi.actionSystem.impl.SimpleDataContext
 import com.intellij.openapi.util.Disposer
+import com.intellij.openapi.util.SystemInfo
 import com.intellij.openapi.util.io.FileUtil
 import com.intellij.openapi.vfs.LocalFileSystem
 import com.intellij.psi.PsiManager
@@ -199,6 +200,75 @@ class SaffronRunConfigurationTest : BasePlatformTestCase() {
             base.resolve("features").toFile().deleteRecursively()
             base.resolve("node_modules").toFile().deleteRecursively()
         }
+    }
+
+    fun `test right-click Run on a scenario whose name the file has twice runs it by line`() {
+        val base = Path.of(project.basePath!!)
+        try {
+            Files.createDirectories(base.resolve("features"))
+            Files.writeString(base.resolve("saffron.config.json"), "{}")
+            Files.writeString(base.resolve("features/twice.saffron"), "Feature: T\n\nScenario: Same\n  Given a\n\nScenario: Same\n  Given b\n\nScenario: Other\n  Given c\n")
+            val vf = LocalFileSystem.getInstance().refreshAndFindFileByNioFile(base.resolve("features/twice.saffron"))!!
+            IndexingTestUtil.waitUntilIndexesAreReady(project)
+            myFixture.configureFromExistingVirtualFile(vf)
+            fun offeredAt(line: Int): SaffronRunConfiguration {
+                myFixture.editor.caretModel.moveToLogicalPosition(com.intellij.openapi.editor.LogicalPosition(line, 0))
+                val dataContext = SimpleDataContext.builder()
+                    .add(CommonDataKeys.PROJECT, project)
+                    .add(CommonDataKeys.EDITOR, myFixture.editor)
+                    .add(Location.DATA_KEY, PsiLocation(myFixture.file))
+                    .build()
+                val context = ConfigurationContext.getFromContext(dataContext, ActionPlaces.UNKNOWN)
+                return (context.configurationsFromContext ?: emptyList()).mapNotNull { it.configuration as? SaffronRunConfiguration }.single()
+            }
+            // The runner's name selector would take the first "Same": each one runs by its line.
+            assertEquals("features/twice.saffron:3", offeredAt(3).paths)
+            assertEquals("features/twice.saffron:6", offeredAt(6).paths)
+            assertEquals("features/twice.saffron:Other", offeredAt(9).paths)
+            assertEquals(2, SaffronScenarioRun.named("Scenario: Same\n\"\"\"\nScenario: Other\n\"\"\"\nScenario: Same\n", "Same"))
+        } finally {
+            Files.deleteIfExists(base.resolve("saffron.config.json"))
+            base.resolve("features").toFile().deleteRecursively()
+        }
+    }
+
+    fun `test the runner is found in a folder above the project, and npx is pinned to the declared range`() {
+        val top = Files.createTempDirectory("saffron-up").toRealPath()
+        try {
+            val app = top.resolve("apps/web")
+            Files.createDirectories(app)
+            val t = top.toString()
+            assertNull(SaffronCommand.localBinary(app.toString(), t))
+            assertNull(SaffronCommand.installedVersion(app.toString(), t))
+            assertEquals("saffron-ai", SaffronCommand.npxPackage(app.toString(), t))
+            // The root's package.json declares the range: npx runs that, not the newest.
+            Files.writeString(top.resolve("package.json"), """{"devDependencies":{"saffron-ai":"^1.0.0"}}""")
+            assertEquals("saffron-ai@^1.0.0", SaffronCommand.npxPackage(app.toString(), t))
+            Files.writeString(top.resolve("package.json"), """{"dependencies":{"saffron-ai":"file:../saffron"}}""")
+            assertEquals("saffron-ai", SaffronCommand.npxPackage(app.toString(), t))
+            // Installed in the monorepo's root: found from the nested project, as Node finds it.
+            Files.createDirectories(top.resolve("node_modules/saffron-ai"))
+            Files.writeString(top.resolve("node_modules/saffron-ai/package.json"), """{"version":"1.0.1"}""")
+            assertEquals("1.0.1", SaffronCommand.installedVersion(app.toString(), t))
+            if (!SystemInfo.isWindows) {
+                val bin = top.resolve("node_modules/.bin/saffron")
+                Files.createDirectories(bin.parent)
+                Files.writeString(bin, "#!/bin/sh\n")
+                bin.toFile().setExecutable(true)
+                assertEquals(bin, SaffronCommand.localBinary(app.toString(), t))
+                // Never above the IDE project's folder.
+                assertNull(SaffronCommand.localBinary(app.toString(), app.toString()))
+            }
+        } finally {
+            top.toFile().deleteRecursively()
+        }
+    }
+
+    fun `test scenario counts read the file's language and skip doc strings`() {
+        val italian = listOf("# language: it", "Funzionalità: F", "  Scenario: Primo", "    Dato x", "  Schema dello scenario: Secondo", "    Dato <y>", "    Esempi:")
+        assertEquals(2 to 0, SaffronProjectScan.count(italian))
+        val quoted = listOf("Feature: F", "Scenario: A", "  Given a doc string", "    \"\"\"", "    Scenario: Quoted", "    StepSet: Quoted", "    \"\"\"", "StepSet: S")
+        assertEquals(1 to 1, SaffronProjectScan.count(quoted))
     }
 
     fun `test a Run lens works while the IDE indexes`() {

@@ -169,7 +169,8 @@ class LastRunTab(project: Project, parent: Disposable) : StatusTab(project, pare
         }
         for ((state, label, icon) in listOf(
             Triple("red", "Failed", AllIcons.General.Error),
-            Triple("yellow", "Healed, pending review", AllIcons.General.Warning),
+            // Yellow is healed, a first recording or a proposal not yet verified: all pending review.
+            Triple("yellow", "Pending review", AllIcons.General.Warning),
         )) {
             val group = attention.orEmpty().filter { it.status == state }
             if (group.isEmpty()) continue

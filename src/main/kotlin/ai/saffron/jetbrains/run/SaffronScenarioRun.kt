@@ -1,18 +1,16 @@
 package ai.saffron.jetbrains.run
 
 import ai.saffron.jetbrains.ui.runnerAtLeast
-import com.google.gson.JsonParser
 import com.intellij.execution.RunnerAndConfigurationSettings
 import com.intellij.openapi.project.Project
 import com.intellij.openapi.util.io.FileUtil
-import java.nio.file.Files
-import java.nio.file.Path
 
 /**
  * One scenario run alone: `saffron run <file>:<scenario name>`, by name so
  * an edit that moves the scenario does not change what runs (by line only
- * for a scenario with no usable name). A Run lens starts it; the context
- * menu makes it for the scenario at the caret.
+ * for a scenario with no usable name, or one whose name the file has
+ * twice). A Run lens starts it; the context menu makes it for the scenario
+ * at the caret.
  */
 object SaffronScenarioRun {
 
@@ -54,18 +52,20 @@ object SaffronScenarioRun {
         }
     }
 
-    /** `file:name`, or `file:line` when the name is blank or the runner would read it as lines (`42`, `10:30`). */
-    fun target(file: String, name: String, line: Int): String =
-        if (name.isNotBlank() && !LINES.matches(name)) "$file:$name" else "$file:$line"
+    /**
+     * `file:name`, or `file:line` when the name is blank, the runner would read it as lines
+     * (`42`, `10:30`), or the file has [twice] a scenario of that name: the runner's name
+     * selector takes the first.
+     */
+    fun target(file: String, name: String, line: Int, twice: Boolean = false): String =
+        if (name.isNotBlank() && !LINES.matches(name) && !twice) "$file:$name" else "$file:$line"
 
     /** The runner's own rule for the part after the file: digits, colon-separated, are lines. */
     private val LINES = Regex("\\d+(:\\d+)*")
 
-    /** Whether the runner [root] runs (its own install, else npx's latest) takes `file:name` targets. */
+    /** Whether the runner [root] runs (its own install, else npx's) takes `file:name` targets. */
     fun runnerRunsScenarios(root: String): Boolean {
-        val version = runCatching {
-            JsonParser.parseString(Files.readString(Path.of(root, "node_modules", "saffron-ai", "package.json"))).asJsonObject.get("version").asString
-        }.getOrNull() ?: return true
+        val version = SaffronCommand.installedVersion(root) ?: return true
         return runnerAtLeast(version, 0, 9, 8)
     }
 
@@ -93,9 +93,21 @@ object SaffronScenarioRun {
         if (lines.getOrElse(up) { "" }.trim().startsWith("@")) {
             while (at < lines.size - 1 && lines[at].trim().let { gap(it) || it.startsWith("@") }) at++
         }
-        var found: Pair<String, Int>? = null
+        val (i, name) = headings(lines, at).lastOrNull() ?: return null
+        return name?.let { it to i + 1 }
+    }
+
+    /** How many scenarios of [text] are named [name]. */
+    fun named(text: CharSequence, name: String): Int = text.lines().let { lines -> headings(lines, lines.size - 1).count { it.second == name } }
+
+    /**
+     * The block headings of [lines] up to index [last], outside doc strings: a scenario's
+     * 0-based line and name, or another block's line and null.
+     */
+    private fun headings(lines: List<String>, last: Int): List<Pair<Int, String?>> {
+        val found = mutableListOf<Pair<Int, String?>>()
         var fence: String? = null
-        for (i in 0..at) {
+        for (i in 0..last) {
             val trimmed = lines.getOrElse(i) { "" }.trim()
             val marker = listOf("\"\"\"", "```").firstOrNull { trimmed.startsWith(it) }
             if (marker != null) {
@@ -104,8 +116,8 @@ object SaffronScenarioRun {
             }
             if (fence != null) continue
             val scenario = SCENARIO.find(trimmed)
-            if (scenario != null) found = scenario.groupValues[2].trim() to i + 1
-            else if (OTHER_BLOCK.containsMatchIn(trimmed)) found = null
+            if (scenario != null) found += i to scenario.groupValues[2].trim()
+            else if (OTHER_BLOCK.containsMatchIn(trimmed)) found += i to null
         }
         return found
     }

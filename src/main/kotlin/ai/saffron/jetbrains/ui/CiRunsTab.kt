@@ -169,7 +169,11 @@ class RunImport(
     val warnings: List<String> = emptyList(),
     val proposals: List<ImportedOutcome> = emptyList(),
     val report: String? = null,
+    /** Screenshots and traces the import wrote, and those already here. */
+    val evidence: ImportedEvidence? = null,
 )
+
+class ImportedEvidence(val written: Int = 0, val unchanged: Int = 0)
 
 /**
  * `saffron <args>` in a project, its output read as JSON whatever the exit
@@ -971,11 +975,15 @@ class CiRunsTab(
         result.error?.let { return "${run.name} #${run.number} was not imported: $it" }
         val imported = result.proposals.count { it.outcome == "imported" }
         val refused = result.proposals.count { it.outcome == "refused" }
+        val warned = if (result.warnings.isNotEmpty()) "${result.warnings.size} warning${if (result.warnings.size == 1) "" else "s"}" else null
+        // As the CLI decides "Nothing changed": no proposal, screenshot, trace or report written.
+        val wrote = (result.evidence?.written ?: 0) > 0 || result.report == "written"
+        if (imported == 0 && refused == 0 && wrote) return "No new proposals from ${run.name} #${run.number}; its report is now the last run${warned?.let { " ($it)" } ?: ""}."
         if (imported == 0 && refused == 0 && result.proposals.isNotEmpty()) return "Already imported: nothing changed for ${run.name} #${run.number}."
         return listOfNotNull(
             "$imported proposal${if (imported == 1) "" else "s"} from ${run.name} #${run.number} ready for review in Proposals",
             if (refused > 0) "$refused not imported" else null,
-            if (result.warnings.isNotEmpty()) "${result.warnings.size} warning${if (result.warnings.size == 1) "" else "s"}" else null,
+            warned,
         ).joinToString(", ") + "."
     }
 }

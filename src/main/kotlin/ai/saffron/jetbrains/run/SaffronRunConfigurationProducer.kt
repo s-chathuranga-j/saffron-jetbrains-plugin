@@ -86,17 +86,21 @@ class SaffronRunConfigurationProducer : LazyRunConfigurationProducer<SaffronRunC
         return LocalFileSystem.getInstance().findFileByNioFile(real)
     }
 
-    /** The target's paths, or the one scenario's `file:name`. */
-    private fun paths(root: String, target: VirtualFile, scenario: Pair<String, Int>?): List<String> =
-        scenario?.let { (name, line) -> relativePaths(root, target).map { SaffronScenarioRun.target(it, name, line) } } ?: relativePaths(root, target)
+    /** The target's paths, or the one scenario's `file:name` (`file:line` for a name the file has twice). */
+    private fun paths(root: String, target: VirtualFile, scenario: Triple<String, Int, Boolean>?): List<String> =
+        scenario?.let { (name, line, twice) -> relativePaths(root, target).map { SaffronScenarioRun.target(it, name, line, twice) } } ?: relativePaths(root, target)
 
-    /** The scenario at the editor's caret, when the context is that file's editor and the runner takes scenario targets. */
-    private fun scenarioAtCaret(context: ConfigurationContext, root: String, target: VirtualFile): Pair<String, Int>? {
+    /**
+     * The scenario at the editor's caret (name, line, and whether another scenario has its name),
+     * when the context is that file's editor and the runner takes scenario targets.
+     */
+    private fun scenarioAtCaret(context: ConfigurationContext, root: String, target: VirtualFile): Triple<String, Int, Boolean>? {
         if (target.isDirectory) return null
         val editor = CommonDataKeys.EDITOR.getData(context.dataContext) ?: return null
         if (FileDocumentManager.getInstance().getFile(editor.document) != target) return null
-        val scenario = SaffronScenarioRun.scenarioAt(editor.document.immutableCharSequence, editor.caretModel.logicalPosition.line) ?: return null
-        return scenario.takeIf { SaffronScenarioRun.runnerRunsScenarios(root) }
+        val text = editor.document.immutableCharSequence
+        val (name, line) = SaffronScenarioRun.scenarioAt(text, editor.caretModel.logicalPosition.line) ?: return null
+        return Triple(name, line, SaffronScenarioRun.named(text, name) > 1).takeIf { SaffronScenarioRun.runnerRunsScenarios(root) }
     }
 
     /** The target relative to the root; nothing when it IS the root (blank runs every feature file there). */
