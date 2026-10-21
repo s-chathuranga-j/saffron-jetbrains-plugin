@@ -497,6 +497,10 @@ class SaffronPluginTest : BasePlatformTestCase() {
             Files.writeString(imported, """{"proposals":[],"evidence":{"written":2,"unchanged":0},"report":"written"}""")
             importRun.actionPerformed(TestActionEvent.createTestEvent(importRun))
             PlatformTestUtil.waitWithEventsDispatching("no report-only summary", { note.text == "No new proposals from e2e #20261001.41; its report is now the last run." }, 60)
+            // Screenshots written, the report not: it is not the last run.
+            Files.writeString(imported, """{"proposals":[],"evidence":{"written":2,"unchanged":0},"report":"unchanged"}""")
+            importRun.actionPerformed(TestActionEvent.createTestEvent(importRun))
+            PlatformTestUtil.waitWithEventsDispatching("no evidence-only summary", { note.text == "No new proposals from e2e #20261001.41." }, 60)
             // A refusal: the reason, under the run and in the note.
             Files.writeString(imported, """{"error":"the bundle is from another repository"}""")
             importRun.actionPerformed(TestActionEvent.createTestEvent(importRun))
@@ -1099,6 +1103,37 @@ class SaffronPluginTest : BasePlatformTestCase() {
             assertEquals(listOf("features/b.saffron"), (0 until list.itemsCount).map { list.getItemAt(it)!!.relativePath })
             search.text = ""
             assertEquals(listOf(true, false), (0 until list.itemsCount).map { list.isItemSelected(it) })
+        } finally {
+            Files.deleteIfExists(base.resolve("saffron.config.json"))
+            base.resolve("features").toFile().deleteRecursively()
+            base.resolve("node_modules").toFile().deleteRecursively()
+        }
+    }
+
+    fun `test a file gone from the project does not come back ticked`() {
+        // The stand-in status is a shell script.
+        if (SystemInfo.isWindows) return
+        val base = Path.of(project.basePath!!)
+        try {
+            standInCases(base, "")
+            Files.createDirectories(base.resolve("features"))
+            Files.writeString(base.resolve("saffron.config.json"), "{}")
+            Files.writeString(base.resolve("features/a.saffron"), "Feature: A\n")
+            Files.writeString(base.resolve("features/b.saffron"), "Feature: B\n")
+            SaffronStatusService.getInstance(project).discoverRoots()
+            val panel = ai.saffron.jetbrains.ui.SaffronPanel(project, testRootDisposable)
+            @Suppress("UNCHECKED_CAST")
+            val list = UIUtil.findComponentOfType(panel, CheckBoxList::class.java) as CheckBoxList<ai.saffron.jetbrains.ui.SaffronFile>
+            val refresh = panel.javaClass.getDeclaredMethod("refresh").apply { isAccessible = true }
+            PlatformTestUtil.waitWithEventsDispatching("the files never loaded", { list.itemsCount == 2 }, 60)
+            list.setItemSelected(list.getItemAt(0), true)
+            Files.delete(base.resolve("features/a.saffron"))
+            refresh.invoke(panel)
+            PlatformTestUtil.waitWithEventsDispatching("a.saffron never left", { list.itemsCount == 1 }, 60)
+            Files.writeString(base.resolve("features/a.saffron"), "Feature: A\n")
+            refresh.invoke(panel)
+            PlatformTestUtil.waitWithEventsDispatching("a.saffron never came back", { list.itemsCount == 2 }, 60)
+            assertEquals(listOf(false, false), (0 until list.itemsCount).map { list.isItemSelected(it) })
         } finally {
             Files.deleteIfExists(base.resolve("saffron.config.json"))
             base.resolve("features").toFile().deleteRecursively()

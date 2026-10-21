@@ -158,8 +158,7 @@ object SaffronProjectScan {
 
     /** Scenarios (in the file's Gherkin language) and step sets of a file's [lines], doc strings left out. */
     internal fun count(lines: List<String>): Pair<Int, Int> {
-        val keywords = SCENARIO_KEYWORDS[languageOf(lines)] ?: SCENARIO_KEYWORDS["en"].orEmpty()
-        val scenario = keywords.take(2).flatten()
+        val scenario = scenarioKeywords(lines)
         val inDocstring = docstringMask(lines)
         var scenarios = 0
         var sets = 0
@@ -170,6 +169,10 @@ object SaffronProjectScan {
         }
         return scenarios to sets
     }
+
+    /** The Scenario and Scenario Outline keywords of [lines]' Gherkin language (English without one). */
+    internal fun scenarioKeywords(lines: List<String>): List<String> =
+        (SCENARIO_KEYWORDS[languageOf(lines)] ?: SCENARIO_KEYWORDS["en"].orEmpty()).take(2).flatten()
 
     /**
      * Each language's Scenario, Scenario Outline and Examples keywords, from the Gherkin the

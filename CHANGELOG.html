@@ -1,5 +1,10 @@
 <h3>Unreleased</h3>
 <ul>
+  <li>Right-click Run finds the scenario at the caret in the file's Gherkin language (<code># language: it</code>), and runs a scenario whose name the file has twice by its line, instead of running the whole file.</li>
+  <li>Without an install, the check that a scenario can run alone reads the version <code>package.json</code> pins <code>npx</code> to (an exact version, or a range's lowest), instead of assuming the newest runner.</li>
+  <li>The search for an installed <code>saffron-ai</code> stops at the IDE project that owns the file, never at an outer project open beside it.</li>
+  <li>A ticked file removed from the project no longer comes back ticked in the Files tab.</li>
+  <li>Importing a CI run that wrote screenshots or traces but no report no longer says its report is now the last run.</li>
   <li>A run cut short (the Stop button, or Ctrl-C) shows as interrupted in the Last Run tab, with how many scenarios did not run, never as "Everything passed". Needs <code>saffron-ai</code> 1.0.1 or later, which writes the report of what finished.</li>
   <li>A date range token such as <code>{date+7 - +9:MMM D, YYYY}</code> is highlighted as a parameter, like <code>{date+7:D. MMM:de-DE}</code>.</li>
   <li>The Saffron panel's last-run line and a CI run's totals say "Run interrupted (N not run)" for a run cut short, never as a finished run.</li>

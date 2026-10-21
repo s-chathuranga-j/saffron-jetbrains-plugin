@@ -45,10 +45,12 @@ object SaffronCommand {
         return generateSequence(start) { dir -> dir.parent?.takeIf { dir != stop } }.toList()
     }
 
-    /** The open IDE project's folder that holds [basePath]. */
-    private fun topOf(basePath: String?): String? = basePath?.let { path ->
-        runCatching { com.intellij.openapi.project.ProjectManager.getInstance().openProjects }.getOrNull().orEmpty()
-            .mapNotNull { it.basePath }.filter { com.intellij.openapi.util.io.FileUtil.isAncestor(it, path, false) }.minByOrNull { it.length }
+    /** The folder of the open IDE project that owns [basePath]: the innermost of [roots] holding it. */
+    internal fun topOf(
+        basePath: String?,
+        roots: List<String> = runCatching { com.intellij.openapi.project.ProjectManager.getInstance().openProjects }.getOrNull().orEmpty().mapNotNull { it.basePath },
+    ): String? = basePath?.let { path ->
+        roots.filter { com.intellij.openapi.util.io.FileUtil.isAncestor(it, path, false) }.maxByOrNull { it.length }
     }
 
     /** The project's own `saffron` binary: the nearest install, from [basePath] up to [top]. */
@@ -80,6 +82,19 @@ object SaffronCommand {
             return if (NPX_RANGE.matches(spec)) "saffron-ai@$spec" else "saffron-ai"
         }
         return "saffron-ai"
+    }
+
+    /**
+     * The lowest version [npxPackage] lets npx run: an exact version, or a range's lower
+     * bound (^1.0.0, ~0.9.5, >=0.9.0, 0.9.*); null when it runs the newest (no spec, `*`, `latest`).
+     */
+    fun npxVersion(basePath: String?, top: String? = topOf(basePath)): String? =
+        lowerBound(npxPackage(basePath, top).removePrefix("saffron-ai").removePrefix("@"))
+
+    internal fun lowerBound(spec: String): String? {
+        if (spec.trimStart().startsWith("<")) return "0.0.0"
+        val version = Regex("\\d+(\\.(\\d+|[xX*]))*").find(spec)?.value ?: return null
+        return (version.split('.').map { it.toIntOrNull() ?: 0 } + listOf(0, 0)).take(3).joinToString(".")
     }
 
     /** A range npm reads (^1.0.0, 0.9.*, >=0.9 <1), wildcards included. */

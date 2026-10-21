@@ -85,13 +85,45 @@ class SaffronRunConfigurationTest : BasePlatformTestCase() {
         assertEquals("features/a.saffron:10:30 sharp", SaffronScenarioRun.target("features/a.saffron", "10:30 sharp", 3))
     }
 
-    fun `test a tag line followed by a comment belongs to the scenario it tags, and another language finds nothing`() {
+    fun `test a tag line followed by a comment belongs to the scenario it tags, in the file's own language`() {
         val tagged = "Feature: F\n  Scenario: A\n    Given x\n\n  @smoke\n  # flaky on CI\n\n  Scenario: B\n"
         assertEquals(listOf("A" to 2, "A" to 2, "B" to 8, "B" to 8, "B" to 8, "B" to 8), (2..7).map { SaffronScenarioRun.scenarioAt(tagged, it) })
-        // Italian has its own "Scenario:" too, and outlines English does not know: the whole file runs, not the scenario above.
-        val italian = "# language: it\nFunzionalità: F\n  Scenario: Primo\n    Dato x\n  Schema dello scenario: Secondo\n    Dato <y>\n"
-        assertNull(SaffronScenarioRun.scenarioAt(italian, 5))
+        // Italian keywords, an outline English does not know included: the scenario at the caret, and its duplicate counted.
+        val italian = "# language: it\nFunzionalità: F\n  Scenario: Primo\n    Dato x\n  Schema dello scenario: Secondo\n    Dato <y>\n  Esempio: Secondo\n"
+        assertEquals("Secondo" to 5, SaffronScenarioRun.scenarioAt(italian, 5))
+        assertEquals("Primo" to 3, SaffronScenarioRun.scenarioAt(italian, 3))
+        assertEquals(2, SaffronScenarioRun.named(italian, "Secondo"))
         assertEquals("Works" to 2, SaffronScenarioRun.scenarioAt("# language: en\nScenario: Works\n", 1))
+    }
+
+    fun `test without an install, the version check reads the version package json pins npx to`() {
+        assertEquals("0.9.7", SaffronCommand.lowerBound("0.9.7"))
+        assertEquals("1.0.0", SaffronCommand.lowerBound("^1.0.0"))
+        assertEquals("0.9.5", SaffronCommand.lowerBound("~0.9.5"))
+        assertEquals("0.9.0", SaffronCommand.lowerBound(">=0.9.0"))
+        assertEquals("0.9.0", SaffronCommand.lowerBound("0.9.*"))
+        assertEquals("0.0.0", SaffronCommand.lowerBound("<1.0.0"))
+        assertNull(SaffronCommand.lowerBound(""))
+        assertNull(SaffronCommand.lowerBound("latest"))
+        val dir = Files.createTempDirectory("saffron-npx")
+        try {
+            fun runs(spec: String?): Boolean {
+                Files.writeString(dir.resolve("package.json"), if (spec == null) "{}" else """{"devDependencies":{"saffron-ai":"$spec"}}""")
+                return SaffronScenarioRun.runnerRunsScenarios(dir.toString())
+            }
+            assertFalse(runs("^0.9.5"))
+            assertFalse(runs("0.9.*"))
+            assertTrue(runs("^0.9.8"))
+            assertTrue(runs(">=1.0.0"))
+            assertTrue(runs(null))
+        } finally {
+            dir.toFile().deleteRecursively()
+        }
+    }
+
+    fun `test the walk up for an install stops at the innermost IDE project holding the path`() {
+        assertEquals("/work/app", SaffronCommand.topOf("/work/app/e2e", listOf("/work", "/work/app", "/other")))
+        assertNull(SaffronCommand.topOf("/elsewhere", listOf("/work")))
     }
 
     fun `test a lens on a scenario of the same name in another file gets its own configuration`() {

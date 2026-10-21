@@ -244,6 +244,8 @@ class SaffronPanel(private val project: Project, parent: Disposable) : SimpleToo
     private fun show(s: SaffronProjectState) {
         state = s
         syncTicks()
+        // The old rows' ticks are in [checked] now: applyFilter must not read a gone file's back.
+        list.clear()
         all = s.files
         // A file gone from the project takes its tick with it.
         checked.retainAll(all.map { it.relativePath }.toSet())

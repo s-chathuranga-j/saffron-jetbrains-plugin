@@ -978,7 +978,9 @@ class CiRunsTab(
         val warned = if (result.warnings.isNotEmpty()) "${result.warnings.size} warning${if (result.warnings.size == 1) "" else "s"}" else null
         // As the CLI decides "Nothing changed": no proposal, screenshot, trace or report written.
         val wrote = (result.evidence?.written ?: 0) > 0 || result.report == "written"
-        if (imported == 0 && refused == 0 && wrote) return "No new proposals from ${run.name} #${run.number}; its report is now the last run${warned?.let { " ($it)" } ?: ""}."
+        // Only a report written becomes the last run; screenshots or traces alone do not.
+        val last = if (result.report == "written") "; its report is now the last run" else ""
+        if (imported == 0 && refused == 0 && wrote) return "No new proposals from ${run.name} #${run.number}$last${warned?.let { " ($it)" } ?: ""}."
         if (imported == 0 && refused == 0 && result.proposals.isNotEmpty()) return "Already imported: nothing changed for ${run.name} #${run.number}."
         return listOfNotNull(
             "$imported proposal${if (imported == 1) "" else "s"} from ${run.name} #${run.number} ready for review in Proposals",

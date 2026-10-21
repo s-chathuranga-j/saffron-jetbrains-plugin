@@ -1,5 +1,6 @@
 package ai.saffron.jetbrains.run
 
+import ai.saffron.jetbrains.ui.SaffronProjectScan
 import ai.saffron.jetbrains.ui.runnerAtLeast
 import com.intellij.execution.RunnerAndConfigurationSettings
 import com.intellij.openapi.project.Project
@@ -63,29 +64,27 @@ object SaffronScenarioRun {
     /** The runner's own rule for the part after the file: digits, colon-separated, are lines. */
     private val LINES = Regex("\\d+(:\\d+)*")
 
-    /** Whether the runner [root] runs (its own install, else npx's) takes `file:name` targets. */
+    /**
+     * Whether the runner [root] runs (its own install, else what npx runs: the lowest version
+     * package.json allows, or the newest without one) takes `file:name` targets.
+     */
     fun runnerRunsScenarios(root: String): Boolean {
-        val version = SaffronCommand.installedVersion(root) ?: return true
+        val version = SaffronCommand.installedVersion(root) ?: SaffronCommand.npxVersion(root) ?: return true
         return runnerAtLeast(version, 0, 9, 8)
     }
 
-    private val SCENARIO = Regex("^(Scenario Outline|Scenario Template|Scenario|Example):(.*)$")
     private val OTHER_BLOCK = Regex("^(Feature|Background|Rule|StepSet):")
-    private val LANGUAGE = Regex("^\\s*#\\s*language\\s*:\\s*([\\w-]+)")
 
     /**
      * The scenario a 0-based [line] of [text] is in, as its name and 1-based
      * keyword line; null in the feature's header, a Background, a Rule's
      * header or a StepSet. A tag line, and a comment or blank line between
-     * tags and their keyword, belong to the scenario tagged. English
-     * keywords only: a file in another language (`# language: it`) finds
-     * nothing, and the whole file runs.
+     * tags and their keyword, belong to the scenario tagged. Scenarios are
+     * found in the file's Gherkin language (`# language: it`), as the Files
+     * tab counts them.
      */
     fun scenarioAt(text: CharSequence, line: Int): Pair<String, Int>? {
         val lines = text.lines()
-        // `# language:` is a comment above everything else.
-        val language = lines.takeWhile { it.isBlank() || it.trim().startsWith("#") }.firstNotNullOfOrNull { LANGUAGE.find(it)?.groupValues?.get(1) }
-        if (language != null && language != "en") return null
         val gap = { s: String -> s.isEmpty() || s.startsWith("#") }
         var at = line.coerceIn(0, (lines.size - 1).coerceAtLeast(0))
         var up = at
@@ -106,6 +105,7 @@ object SaffronScenarioRun {
      */
     private fun headings(lines: List<String>, last: Int): List<Pair<Int, String?>> {
         val found = mutableListOf<Pair<Int, String?>>()
+        val keywords = SaffronProjectScan.scenarioKeywords(lines)
         var fence: String? = null
         for (i in 0..last) {
             val trimmed = lines.getOrElse(i) { "" }.trim()
@@ -115,8 +115,8 @@ object SaffronScenarioRun {
                 continue
             }
             if (fence != null) continue
-            val scenario = SCENARIO.find(trimmed)
-            if (scenario != null) found += i to scenario.groupValues[2].trim()
+            val keyword = keywords.firstOrNull { trimmed.startsWith("$it:") }
+            if (keyword != null) found += i to trimmed.substring(keyword.length + 1).trim()
             else if (OTHER_BLOCK.containsMatchIn(trimmed)) found += i to null
         }
         return found
