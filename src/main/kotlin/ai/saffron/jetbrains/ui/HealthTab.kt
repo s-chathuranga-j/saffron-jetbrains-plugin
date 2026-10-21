@@ -2,7 +2,7 @@ package ai.saffron.jetbrains.ui
 
 import com.intellij.icons.AllIcons
 import com.intellij.openapi.Disposable
-import com.intellij.openapi.fileEditor.FileEditorManager
+import com.intellij.openapi.fileEditor.OpenFileDescriptor
 import com.intellij.openapi.project.Project
 import com.intellij.openapi.vfs.LocalFileSystem
 import com.intellij.ui.ColoredTreeCellRenderer
@@ -115,6 +115,6 @@ class HealthTab(project: Project, parent: Disposable) : StatusTab(project, paren
 
     private fun openConfig() {
         val vf = LocalFileSystem.getInstance().refreshAndFindFileByNioFile(projectRoot.resolve("saffron.config.json"))
-        if (vf != null) FileEditorManager.getInstance(project).openFile(vf, true) else note.text = "No saffron.config.json yet: run npx saffron init."
+        if (vf != null) OpenFileDescriptor(project, vf).navigate(true) else note.text = "No saffron.config.json yet: run npx saffron init."
     }
 }

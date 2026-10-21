@@ -15,7 +15,7 @@ import com.intellij.openapi.actionSystem.AnAction
 import com.intellij.openapi.actionSystem.AnActionEvent
 import com.intellij.openapi.actionSystem.DefaultActionGroup
 import com.intellij.openapi.application.ApplicationManager
-import com.intellij.openapi.fileEditor.FileEditorManager
+import com.intellij.openapi.fileEditor.OpenFileDescriptor
 import com.intellij.openapi.project.DumbAwareAction
 import com.intellij.openapi.project.Project
 import com.intellij.openapi.ui.SimpleToolWindowPanel
@@ -198,7 +198,7 @@ class SaffronPanel(private val project: Project, parent: Disposable) : SimpleToo
 
     private fun open(file: SaffronFile) {
         val vf = LocalFileSystem.getInstance().refreshAndFindFileByNioFile(service.root.resolve(file.relativePath)) ?: return
-        FileEditorManager.getInstance(project).openFile(vf, true)
+        OpenFileDescriptor(project, vf).navigate(true)
     }
 
     // ---------------------------------------------------------------- state

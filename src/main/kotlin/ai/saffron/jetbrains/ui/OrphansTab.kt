@@ -3,7 +3,7 @@ package ai.saffron.jetbrains.ui
 import ai.saffron.jetbrains.run.SaffronRunner
 import com.intellij.icons.AllIcons
 import com.intellij.openapi.Disposable
-import com.intellij.openapi.fileEditor.FileEditorManager
+import com.intellij.openapi.fileEditor.OpenFileDescriptor
 import com.intellij.openapi.project.Project
 import com.intellij.openapi.ui.Messages
 import com.intellij.openapi.vfs.LocalFileSystem
@@ -148,7 +148,7 @@ class OrphansTab(project: Project, parent: Disposable) : StatusTab(project, pare
         val row = (tree.lastSelectedPathComponent as? DefaultMutableTreeNode)?.userObject as? OrphanRow ?: return false
         val file = row.file ?: return false
         val vf = LocalFileSystem.getInstance().refreshAndFindFileByNioFile(projectFile(projectRoot, file) ?: return refused(file)) ?: return false
-        FileEditorManager.getInstance(project).openFile(vf, true)
+        OpenFileDescriptor(project, vf).navigate(true)
         return true
     }
 

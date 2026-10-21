@@ -5,7 +5,6 @@ import com.google.gson.Gson
 import com.google.gson.JsonObject
 import com.intellij.execution.configurations.GeneralCommandLine
 import com.intellij.execution.util.ExecUtil
-import com.intellij.ide.trustedProjects.TrustedProjectsListener
 import com.intellij.ide.util.PropertiesComponent
 import com.intellij.openapi.Disposable
 import com.intellij.openapi.application.ApplicationManager
@@ -263,18 +262,6 @@ class SaffronStatusService(private val project: Project) : Disposable {
     fun discoverRoots(): List<Path> =
         (project.basePath?.let { SaffronRoots.discover(Path.of(it)) } ?: emptyList()).also { roots = it }
 
-    init {
-        // Load once the project is trusted, not only at the next refresh.
-        ApplicationManager.getApplication().messageBus.connect(this).subscribe(
-            TrustedProjectsListener.TOPIC,
-            object : TrustedProjectsListener {
-                override fun onProjectTrusted(project: Project) {
-                    if (project == this@SaffronStatusService.project) refresh()
-                }
-            },
-        )
-    }
-
     /** The project the tool window shows: the one chosen when there are several, else the only one, else the IDE root. */
     val root: Path
         get() {
@@ -308,7 +295,11 @@ class SaffronStatusService(private val project: Project) : Disposable {
         try {
             discoverRoots()
             val shown = root
-            val loaded = if (SaffronCommand.trusted(project)) runStatus(shown.toString()) else StatusLoad(null, UNTRUSTED)
+            val trusted = SaffronCommand.trusted(project)
+            val loaded = if (trusted) runStatus(shown.toString()) else StatusLoad(null, UNTRUSTED)
+            // Load once the project is trusted, not only at the next refresh. The platform's
+            // trust listener is experimental API, so the check (no process) repeats instead.
+            if (!trusted) awaitTrust()
             // Another project chosen meanwhile: this answer is not its status, and choose() asked for that one.
             if (shown != root) return
             val result = StatusLoad(loaded.status, loaded.error, shown)
@@ -322,10 +313,16 @@ class SaffronStatusService(private val project: Project) : Disposable {
         }
     }
 
+    /** Only the trust check repeats, not the project scan: the status loads once it passes. */
+    private fun awaitTrust() {
+        alarm.addRequest({ if (SaffronCommand.trusted(project)) refresh() else awaitTrust() }, UNTRUSTED_RECHECK_MS)
+    }
+
     override fun dispose() {}
 
     companion object {
         private const val ROOT_KEY = "ai.saffron.jetbrains.root"
+        private const val UNTRUSTED_RECHECK_MS = 2_000
 
         /** Shown instead of running anything in a project the user has not trusted. */
         const val UNTRUSTED = "Trust the project to load Saffron status"

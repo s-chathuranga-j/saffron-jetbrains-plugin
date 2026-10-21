@@ -5,7 +5,7 @@ import com.intellij.icons.AllIcons
 import com.intellij.ide.BrowserUtil
 import com.intellij.openapi.Disposable
 import com.intellij.openapi.application.ApplicationManager
-import com.intellij.openapi.fileEditor.FileEditorManager
+import com.intellij.openapi.fileEditor.OpenFileDescriptor
 import com.intellij.openapi.project.Project
 import com.intellij.openapi.vfs.LocalFileSystem
 import com.intellij.openapi.vfs.VfsUtil
@@ -244,7 +244,7 @@ class LastRunTab(project: Project, parent: Disposable) : StatusTab(project, pare
             app.invokeLater({
                 // Names its scenario: the selection may have moved on meanwhile.
                 result.problem?.let { note.text = it }
-                result.file?.let { FileEditorManager.getInstance(project).openFile(it, true) }
+                result.file?.let { OpenFileDescriptor(project, it).navigate(true) }
             }, project.disposed)
         }
         return true
