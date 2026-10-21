@@ -83,6 +83,9 @@ class SaffronRunConfigurationTest : BasePlatformTestCase() {
         assertEquals(listOf("features/x.saffron:Pay, then ship,"), SaffronCommand.splitPaths(paths))
         assertEquals(listOf("a.saffron", "b.saffron"), SaffronCommand.splitPaths("a.saffron, b.saffron"))
         assertEquals("features/a.saffron:10:30 sharp", SaffronScenarioRun.target("features/a.saffron", "10:30 sharp", 3))
+        // A name with ":" in it: the file ends at the first .saffron or .feature, as in the runner.
+        assertEquals("features/a.saffron", SaffronScenarioRun.fileOf("features/a.saffron:Pay: then ship"))
+        assertEquals("features/b.feature", SaffronScenarioRun.fileOf("features/b.feature:10:30 sharp"))
     }
 
     fun `test a tag line followed by a comment belongs to the scenario it tags, in the file's own language`() {

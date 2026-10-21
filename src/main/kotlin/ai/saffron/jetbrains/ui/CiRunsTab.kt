@@ -225,8 +225,10 @@ internal class RunNode(
     override fun toString(): String = label
 }
 
-/** Whole megabytes, rounded up: a limit of this many lets [bytes] through whether the runner counts MB or MiB. */
-internal fun megabytes(bytes: Long): Long = ((bytes + 999_999) / 1_000_000).coerceAtLeast(1)
+/** Whole megabytes as the runner counts them (MiB), rounded up: a limit of this many lets [bytes] through. */
+internal fun megabytes(bytes: Long): Long = ((bytes + MIB - 1) / MIB).coerceAtLeast(1)
+
+private const val MIB = 1024L * 1024
 
 /** The download limit in MB from the settings; 0 is none. */
 internal fun ciMaxDownloadMb(): Int = PropertiesComponent.getInstance().getInt(CI_MAX_DOWNLOAD_KEY, CI_MAX_DOWNLOAD_DEFAULT)
@@ -981,7 +983,8 @@ class CiRunsTab(
         // Only a report written becomes the last run; screenshots or traces alone do not.
         val last = if (result.report == "written") "; its report is now the last run" else ""
         if (imported == 0 && refused == 0 && wrote) return "No new proposals from ${run.name} #${run.number}$last${warned?.let { " ($it)" } ?: ""}."
-        if (imported == 0 && refused == 0 && result.proposals.isNotEmpty()) return "Already imported: nothing changed for ${run.name} #${run.number}."
+        // The runner's words, with or without proposals in the run.
+        if (imported == 0 && refused == 0) return "Nothing changed: this was already imported."
         return listOfNotNull(
             "$imported proposal${if (imported == 1) "" else "s"} from ${run.name} #${run.number} ready for review in Proposals",
             if (refused > 0) "$refused not imported" else null,

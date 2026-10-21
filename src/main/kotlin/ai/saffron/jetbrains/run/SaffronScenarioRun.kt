@@ -33,10 +33,13 @@ object SaffronScenarioRun {
      * name of its own: rewriting that one's configuration would change what
      * its Run tab reruns.
      */
+    /** The file of a `file:name` target, as the runner splits it: a name may hold ":". */
+    internal fun fileOf(target: String): String = Regex("""^(.+?\.(?:saffron|feature)):""").find(target)?.groupValues?.get(1) ?: target
+
     fun configuration(project: Project, root: String, target: String, scenario: String, mode: String): RunnerAndConfigurationSettings {
         val dir = FileUtil.toSystemIndependentName(root)
         val paths = SaffronCommand.joinPaths(listOf(target))
-        val file = target.substringBeforeLast(':')
+        val file = fileOf(target)
         // The file's path from the IDE project tells nested projects' files apart.
         val inProject = project.basePath?.let { FileUtil.getRelativePath(FileUtil.toSystemIndependentName(it), "$dir/$file", '/') } ?: "$dir/$file"
         // The first name whose configuration (the one prepare would reuse, past a saved

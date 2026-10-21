@@ -492,7 +492,12 @@ class SaffronPluginTest : BasePlatformTestCase() {
             // The same run again: nothing new.
             Files.writeString(imported, """{"proposals":[{"file":".saffron/proposals/login-saffron/sign-in.json","feature":"features/login.saffron","scenario":"Sign in","outcome":"unchanged"}]}""")
             importRun.actionPerformed(TestActionEvent.createTestEvent(importRun))
-            PlatformTestUtil.waitWithEventsDispatching("no re-import summary", { note.text == "Already imported: nothing changed for e2e #20261001.41." }, 60)
+            PlatformTestUtil.waitWithEventsDispatching("no re-import summary", { note.text == "Nothing changed: this was already imported." }, 60)
+            // A run with no proposals, imported again: the same words, never "0 proposals ready for review".
+            Files.writeString(imported, """{"proposals":[],"evidence":{"written":0,"unchanged":2},"report":"unchanged"}""")
+            note.text = ""
+            importRun.actionPerformed(TestActionEvent.createTestEvent(importRun))
+            PlatformTestUtil.waitWithEventsDispatching("no empty re-import summary", { note.text == "Nothing changed: this was already imported." }, 60)
             // A run that filed no proposal, its report imported: never "0 proposals ready for review".
             Files.writeString(imported, """{"proposals":[],"evidence":{"written":2,"unchanged":0},"report":"written"}""")
             importRun.actionPerformed(TestActionEvent.createTestEvent(importRun))
@@ -702,11 +707,13 @@ class SaffronPluginTest : BasePlatformTestCase() {
         assertEquals("No results yet", running.single().toString())
 
         val big = viewRows(Gson().fromJson("""{"error":"the results are 250.5 MB","kind":"too-large","sizeBytes":250500000}""", RunView::class.java), null, limitMb = 100)
-        assertEquals("This run's results are 251 MB", big.single().toString())
+        assertEquals("This run's results are 239 MB", big.single().toString())
         assertEquals("above the 100 MB download limit: double-click to download", node(big.single()).detail)
         assertEquals(250_500_000L, node(big.single()).tooLarge)
         assertEquals(1L, megabytes(1))
-        assertEquals(2L, megabytes(1_000_001))
+        assertEquals(1L, megabytes(1_000_001))
+        assertEquals(1L, megabytes(1_048_576))
+        assertEquals(2L, megabytes(1_048_577))
 
         val refused = viewRows(Gson().fromJson("""{"error":"the bundle is from another repository"}""", RunView::class.java), null)
         assertEquals("Results unavailable", refused.single().toString())
