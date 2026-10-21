@@ -28,6 +28,7 @@ class HealthTab(project: Project, parent: Disposable) : StatusTab(project, paren
     private val root = DefaultMutableTreeNode(Row("Saffron"))
     private val model = DefaultTreeModel(root)
     private val tree = Tree(model).apply {
+        accessibleContext.accessibleName = "Suite health"
         isRootVisible = false
         showsRootHandles = true
         cellRenderer = object : ColoredTreeCellRenderer() {

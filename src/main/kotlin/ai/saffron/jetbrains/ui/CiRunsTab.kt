@@ -359,6 +359,7 @@ class CiRunsTab(
     private val root = DefaultMutableTreeNode(RunNode("CI runs"))
     private val model = DefaultTreeModel(root)
     private val tree = Tree(model).apply {
+        accessibleContext.accessibleName = "CI runs"
         isRootVisible = false
         showsRootHandles = true
         cellRenderer = object : ColoredTreeCellRenderer() {

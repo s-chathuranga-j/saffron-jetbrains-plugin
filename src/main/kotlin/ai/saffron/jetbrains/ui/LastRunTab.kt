@@ -57,6 +57,12 @@ internal fun attentionLabel(a: StatusAttention, matrix: Boolean): String =
 internal fun attentionTraceSelector(a: StatusAttention): String =
     "${a.feature}:${a.scenario}" + (a.browser?.let { "@$it" } ?: "")
 
+/** The picture a row opens, as the runner picks it: the failure, then the page before a heal, then any other. */
+internal fun screenshotOf(evidence: List<StatusEvidence>): StatusEvidence? {
+    val shots = evidence.filter { it.kind != "trace" }
+    return shots.firstOrNull { it.kind == "failure" } ?: shots.firstOrNull { it.kind == "before-heal" } ?: shots.firstOrNull()
+}
+
 internal fun screenshotToShow(base: String, shot: StatusEvidence, scenario: String): Screenshot {
     val file = projectFile(java.nio.file.Path.of(base), shot.file)?.toFile()
         ?: return Screenshot(problem = "Not opened: ${shot.file} is outside the project.")
@@ -115,6 +121,7 @@ class LastRunTab(project: Project, parent: Disposable) : StatusTab(project, pare
     /** The listed run's HTML report, project-relative. */
     private var reportHtml: String? = null
     private val tree = Tree(model).apply {
+        accessibleContext.accessibleName = "Last run results"
         isRootVisible = false
         showsRootHandles = true
         cellRenderer = object : ColoredTreeCellRenderer() {
@@ -176,7 +183,7 @@ class LastRunTab(project: Project, parent: Disposable) : StatusTab(project, pare
             if (group.isEmpty()) continue
             val parent = DefaultMutableTreeNode(RunRow(label, "${group.size}", AllIcons.Nodes.Folder))
             for (a in group) {
-                val shot = a.evidence.firstOrNull { it.kind != "trace" }
+                val shot = screenshotOf(a.evidence)
                 parent.add(
                     DefaultMutableTreeNode(
                         RunRow(
@@ -228,7 +235,7 @@ class LastRunTab(project: Project, parent: Disposable) : StatusTab(project, pare
     private fun openScreenshot(): Boolean {
         val a = selected() ?: return false
         // A trace is not a picture; the pictures come first, the replay has its own action.
-        val shot = a.evidence.firstOrNull { it.kind != "trace" } ?: return false
+        val shot = screenshotOf(a.evidence) ?: return false
         val base = projectRoot.toString()
         clearNote()
         val app = ApplicationManager.getApplication()

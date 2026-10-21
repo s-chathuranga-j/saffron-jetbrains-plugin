@@ -685,6 +685,15 @@ class SaffronPluginTest : BasePlatformTestCase() {
         assertTrue(labels.toString(), labels.containsAll(listOf("A · chromium", "A · firefox")))
     }
 
+    fun `test a row opens the screenshot the runner picks, failure then before-heal, then any other`() {
+        fun ev(vararg kinds: String) = kinds.map { ai.saffron.jetbrains.ui.StatusEvidence(kind = it, file = "$it.png") }
+        // A failed heal: the trace and the page before the heal come before the failure.
+        assertEquals("failure", ai.saffron.jetbrains.ui.screenshotOf(ev("trace", "before-heal", "failure"))?.kind)
+        assertEquals("before-heal", ai.saffron.jetbrains.ui.screenshotOf(ev("trace", "other", "before-heal"))?.kind)
+        assertEquals("other", ai.saffron.jetbrains.ui.screenshotOf(ev("trace", "other"))?.kind)
+        assertNull(ai.saffron.jetbrains.ui.screenshotOf(ev("trace")))
+    }
+
     fun `test Open Trace names the example row and passes --max-download only to report`() {
         val example = Gson().fromJson("""{"feature":"features/login.saffron","scenario":"Login","displayName":"Login (example 1)"}""", ai.saffron.jetbrains.ui.CiScenario::class.java)
         assertEquals("features/login.saffron:Login (example 1)", ai.saffron.jetbrains.ui.ciTraceSelector(example))

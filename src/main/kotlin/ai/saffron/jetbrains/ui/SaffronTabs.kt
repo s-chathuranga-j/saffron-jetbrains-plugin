@@ -128,20 +128,21 @@ abstract class StatusTab(protected val project: Project, parent: Disposable) : S
 /** Pending proposals: tick, read the narrative, accept or reject. */
 class ProposalsTab(project: Project, parent: Disposable) : StatusTab(project, parent) {
 
-    private val list = CheckBoxList<StatusProposal>()
+    private val list = CheckBoxList<StatusProposal>().apply { accessibleContext.accessibleName = "Pending proposals" }
     /** Proposal files the runner could not read: not decidable here, shown with the reason. */
     private val unreadable = JBList<UnreadableProposal>().apply {
+        accessibleContext.accessibleName = "Unreadable proposals"
         cellRenderer = object : ColoredListCellRenderer<UnreadableProposal>() {
             override fun customizeCellRenderer(list: JList<out UnreadableProposal>, value: UnreadableProposal, index: Int, selected: Boolean, hasFocus: Boolean) {
                 icon = AllIcons.General.Warning
                 append(value.file)
                 append("  ${value.problem}", SimpleTextAttributes.GRAYED_ATTRIBUTES)
-                toolTipText = "${value.file}\n${value.problem}"
+                toolTipText = tooltipHtml(value.file, value.problem)
             }
         }
         isVisible = false
     }
-    private val details = JBTextArea().apply { isEditable = false; lineWrap = true; wrapStyleWord = true; border = JBUI.Borders.empty(6) }
+    private val details = JBTextArea().apply { accessibleContext.accessibleName = "Proposal details"; isEditable = false; lineWrap = true; wrapStyleWord = true; border = JBUI.Borders.empty(6) }
     private var items: List<StatusProposal> = emptyList()
     /**
      * `saffron diff` output per proposal VERSION: the evidence behind the
@@ -305,7 +306,7 @@ class ProposalsTab(project: Project, parent: Disposable) : StatusTab(project, pa
 /** Tags with scenario counts; tick and run with --filter. */
 class TagsTab(project: Project, parent: Disposable) : StatusTab(project, parent) {
 
-    private val list = CheckBoxList<StatusTag>()
+    private val list = CheckBoxList<StatusTag>().apply { accessibleContext.accessibleName = "Tags" }
     private val replayOnly = JBCheckBox("Replay only (no AI)")
     private val headed = JBCheckBox("Headed browser")
     private var items: List<StatusTag> = emptyList()

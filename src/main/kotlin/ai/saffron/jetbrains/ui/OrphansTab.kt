@@ -47,6 +47,7 @@ class OrphansTab(project: Project, parent: Disposable) : StatusTab(project, pare
     private var count = 0
     private var unknown: String? = null
     private val tree = Tree(model).apply {
+        accessibleContext.accessibleName = "Orphaned recordings"
         isRootVisible = false
         showsRootHandles = true
         cellRenderer = object : ColoredTreeCellRenderer() {
@@ -124,7 +125,7 @@ class OrphansTab(project: Project, parent: Disposable) : StatusTab(project, pare
                                 o.scenario ?: o.file.substringAfterLast('/'),
                                 "${o.feature ?: ""} · ${why(o.reason)}".trim(' ', '·'),
                                 AllIcons.General.Warning,
-                                "${o.file}\n${why(o.reason)}\nDouble-click to open the recording.",
+                                tooltipHtml(o.file, why(o.reason), "Double-click to open the recording."),
                                 o.file,
                             )
                         },

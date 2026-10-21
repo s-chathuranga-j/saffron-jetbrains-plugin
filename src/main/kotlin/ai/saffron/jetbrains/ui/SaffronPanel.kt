@@ -50,8 +50,11 @@ import javax.swing.event.DocumentEvent
  */
 class SaffronPanel(private val project: Project, parent: Disposable) : SimpleToolWindowPanel(true, true) {
 
-    private val list = CheckBoxList<SaffronFile>()
-    private val search = SearchTextField(false)
+    private val list = CheckBoxList<SaffronFile>().apply { accessibleContext.accessibleName = "Feature files" }
+    private val search = SearchTextField(false).apply {
+        textEditor.emptyText.text = "Search feature files"
+        textEditor.accessibleContext.accessibleName = "Search feature files"
+    }
     private val replayOnly = JBCheckBox("Replay only (no AI)")
     private val headed = JBCheckBox("Headed browser")
     private val status = JBLabel()
