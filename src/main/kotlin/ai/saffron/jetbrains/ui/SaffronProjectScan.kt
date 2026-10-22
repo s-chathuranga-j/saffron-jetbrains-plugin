@@ -2,6 +2,7 @@ package ai.saffron.jetbrains.ui
 
 import ai.saffron.jetbrains.run.SaffronCommand
 import com.google.gson.JsonParser
+import com.intellij.openapi.util.io.FileUtil
 import java.nio.file.Files
 import java.nio.file.LinkOption
 import java.nio.file.Path
@@ -90,11 +91,15 @@ object SaffronProjectScan {
     fun testFolderMoved(base: Path, shown: Path?, reported: String?): Boolean =
         shown != null && reported != null && base.toAbsolutePath().resolve(reported.ifBlank { "features" }).normalize() != shown
 
-    /** Whether [path] is in the test folder of the project at [base], and not under .saffron, node_modules or .git. */
+    /**
+     * Whether [path] is in the test folder of the project at [base], and not under .saffron, node_modules or .git.
+     * Compared as the file system does: on macOS and Windows a `Features` folder is the configured `features`.
+     */
     fun inFeaturesDir(base: Path, path: Path): Boolean {
         val dir = featuresDir(base)
         val p = path.toAbsolutePath().normalize()
-        return p.startsWith(dir) && dir.relativize(p).none { it.name in RUNNER_SKIP_DIRS }
+        return FileUtil.isAncestor(dir.toString(), p.toString(), false) &&
+            (p.nameCount == dir.nameCount || p.subpath(dir.nameCount, p.nameCount).none { it.name in RUNNER_SKIP_DIRS })
     }
 
     fun scan(basePath: String): SaffronProjectState {

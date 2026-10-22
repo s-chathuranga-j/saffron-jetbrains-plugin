@@ -1,3 +1,8 @@
+<h3>Unreleased</h3>
+<ul>
+  <li>The test folder is matched as the file system matches names: on macOS and Windows a <code>Features</code> folder is the configured <code>features</code>, as the runner reads it, so its files get right-click Run and open from a report. Linux still tells them apart.</li>
+  <li>With a <code>saffron-ai</code> older than 0.7.0, Remove All in the Orphans tab says to update instead of "Nothing to prune". That tab and Last Run name the version they need (0.7.0 and 0.7.2) instead of "the release with ...".</li>
+</ul>
 <h3>0.7.2</h3>
 <ul>
   <li>No deprecated or experimental platform API: files open through <code>OpenFileDescriptor</code>, and the status loads once a project is trusted by checking trust again every two seconds instead of through the experimental trust listener. The Marketplace verifier reports no warnings.</li>
@@ -33,7 +38,7 @@
 <ul>
   <li><b>The selected CI run as one page, below the runs.</b> CI Runs shows the page viewing the run writes beside its report, the one VS Code shows too: the totals, each failed and pending-review scenario as a card with its screenshot (click it for the whole page), failing step, error and what the agent said, what passed, and the proposals. Its buttons open a scenario's trace or the scenario itself, the run's report and the run's page, and Import Run, after which the page loads again with what is importable now. Needs <code>saffron-ai</code> 1.0.0 or later; with an older runner the page says it arrives with 1.0.0 and which version the project has, and the runs work as before.</li>
   <li><b>A run says what it left to view</b> before you select it (GitHub): its results and their size, a summary only (<code>saffron export --report-only</code>), results expired, or no results.</li>
-  <li>The Orphans tab says when the scan could not finish, and offers no Remove All, instead of reporting no orphaned recordings (<code>saffron-ai</code> 1.0.0).</li>
+  <li>The Orphans tab says when the scan could not finish, and Remove All refuses with the same message, instead of reporting no orphaned recordings (<code>saffron-ai</code> 1.0.0).</li>
   <li>A scan of a project selected before another one finishes no longer replaces the newly selected project's files, and switching projects clears the previous project's selection, so Run Selected never runs it against the new one.</li>
   <li>The CI results page loads the run again when its cached page was cleared, instead of asking for an upgrade; a runner's structured CI answer (not signed in, CI tool missing) keeps its message, provider and branch.</li>
   <li>An IDE whose built-in browser cannot start keeps the Saffron tool window: the Dashboard tab says so instead.</li>

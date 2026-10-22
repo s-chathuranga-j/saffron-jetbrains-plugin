@@ -46,7 +46,8 @@ internal fun projectFile(root: Path, rel: String): Path? {
     val full = runCatching { base.resolve(rel).normalize() }.getOrNull()?.takeIf { rel.isNotEmpty() } ?: return null
     val trusted = listOf(base, SaffronProjectScan.featuresDir(base), base.resolve(".saffron"))
     val real = trusted.map { r -> runCatching { r.toRealPath() }.getOrDefault(r) }
-    fun inside(p: Path, roots: List<Path>) = roots.any { p.startsWith(it) && p != it }
+    // As the file system compares names: case-insensitively on macOS and Windows.
+    fun inside(p: Path, roots: List<Path>) = roots.any { com.intellij.openapi.util.io.FileUtil.isAncestor(it.toString(), p.toString(), true) }
     return full.takeIf { inside(it, trusted + real) }
 }
 

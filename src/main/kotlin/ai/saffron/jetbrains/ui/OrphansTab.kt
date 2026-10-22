@@ -88,8 +88,10 @@ class OrphansTab(project: Project, parent: Disposable) : StatusTab(project, pare
         val orphans = status.orphans
         if (orphans == null) {
             // An older runner's status has no orphan list. Saying "none" would
-            // be a claim this plugin cannot make from the data it has.
-            tree.emptyText.text = "Update saffron-ai to the release with `saffron prune`"
+            // be a claim this plugin cannot make from the data it has, and
+            // Remove All refuses with the same message.
+            unknown = "Update saffron-ai to 0.7.0 or later, which lists orphaned recordings"
+            tree.emptyText.text = unknown!!
             model.reload()
             return
         }

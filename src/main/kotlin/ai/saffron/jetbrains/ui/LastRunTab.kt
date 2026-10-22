@@ -40,7 +40,7 @@ internal fun lastRunEmptyText(status: ProjectStatus?): String {
         status == null -> "Loading…"
         run == null -> "No run yet"
         // Saying "everything passed" would be a claim this data cannot support.
-        run.attention == null -> "Update saffron-ai to the release with failure screenshots"
+        run.attention == null -> "Update saffron-ai to 0.7.2 or later, which lists failure screenshots"
         run.interrupted -> "Run interrupted: ${run.notRun ?: "some"} scenario(s) did not run, and count as neither passed nor failed"
         else -> "Everything passed: ${run.totals.green} green in the last run"
     }

@@ -125,6 +125,18 @@ class SaffronPluginTest : BasePlatformTestCase() {
         assertNull(projectFile(root, "../shopping/a.saffron"))
     }
 
+    fun `test the test folder is matched as the file system matches names`() {
+        val base = java.nio.file.Path.of("/work/shop")
+        val insensitive = !SystemInfo.isFileSystemCaseSensitive
+        assertTrue(SaffronProjectScan.inFeaturesDir(base, base.resolve("features/a.saffron")))
+        // macOS and Windows open "features" as "Features"; Linux does not.
+        assertEquals(insensitive, SaffronProjectScan.inFeaturesDir(base, base.resolve("Features/a.saffron")))
+        assertEquals(insensitive, SaffronProjectScan.inFeaturesDir(base, base.resolve("FEATURES")))
+        assertFalse(SaffronProjectScan.inFeaturesDir(base, base.resolve("Features/node_modules/x/a.feature")))
+        assertFalse(SaffronProjectScan.inFeaturesDir(base, base.resolve("features-old/a.saffron")))
+        assertEquals(insensitive, projectFile(base, "/WORK/Shop/features/a.saffron") != null)
+    }
+
     // Was "a symlink inside the project to a file outside it is refused": the runner
     // follows linked folders in the test folder wherever they lead and checks a path
     // as written, so the editor opens what the runner runs.
@@ -672,6 +684,7 @@ class SaffronPluginTest : BasePlatformTestCase() {
         val stopped = ProjectStatus(lastRun = StatusLastRun(attention = emptyList(), interrupted = true, notRun = 4))
         assertEquals("Run interrupted: 4 scenario(s) did not run, and count as neither passed nor failed", ai.saffron.jetbrains.ui.lastRunEmptyText(stopped))
         assertEquals("Everything passed: 0 green in the last run", ai.saffron.jetbrains.ui.lastRunEmptyText(ProjectStatus(lastRun = StatusLastRun(attention = emptyList()))))
+        assertEquals("Update saffron-ai to 0.7.2 or later, which lists failure screenshots", ai.saffron.jetbrains.ui.lastRunEmptyText(ProjectStatus(lastRun = StatusLastRun(attention = null))))
         assertEquals("A", ai.saffron.jetbrains.ui.attentionLabel(webkit, matrix = false))
         assertEquals("features/a.saffron:A@webkit", ai.saffron.jetbrains.ui.attentionTraceSelector(webkit))
         assertEquals("features/a.saffron:A", ai.saffron.jetbrains.ui.attentionTraceSelector(StatusAttention(feature = "features/a.saffron", scenario = "A")))
@@ -917,6 +930,15 @@ class SaffronPluginTest : BasePlatformTestCase() {
             standInCases(base, """  status) echo '{"packageInstalled":true,"features":[],"orphans":[],"orphanScan":{"complete":false,"errors":["e2e/wip.saffron: Missing StepSet"]}}' ;;""")
             refresh.actionPerformed(TestActionEvent.createTestEvent(refresh))
             PlatformTestUtil.waitWithEventsDispatching("an incomplete scan looked healthy", { tree.emptyText.text == "Orphaned recordings not checked: e2e/wip.saffron: Missing StepSet" }, 60)
+            remove.actionPerformed(TestActionEvent.createTestEvent(remove))
+            assertEquals("Orphaned recordings not checked: e2e/wip.saffron: Missing StepSet", note.text)
+            // An older runner lists no orphans at all: Remove All never says there is nothing to prune.
+            standInCases(base, """  status) echo '{"packageInstalled":true,"features":[]}' ;;""")
+            refresh.actionPerformed(TestActionEvent.createTestEvent(refresh))
+            val older = "Update saffron-ai to 0.7.0 or later, which lists orphaned recordings"
+            PlatformTestUtil.waitWithEventsDispatching("an older runner looked healthy", { tree.emptyText.text == older }, 60)
+            remove.actionPerformed(TestActionEvent.createTestEvent(remove))
+            assertEquals(older, note.text)
         } finally { Files.deleteIfExists(base.resolve("node_modules/.bin/saffron")) }
     }
 
