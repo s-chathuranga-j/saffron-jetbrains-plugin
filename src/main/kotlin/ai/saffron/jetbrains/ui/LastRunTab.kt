@@ -57,11 +57,16 @@ internal fun attentionLabel(a: StatusAttention, matrix: Boolean): String =
 internal fun attentionTraceSelector(a: StatusAttention): String =
     "${a.feature}:${a.scenario}" + (a.browser?.let { "@$it" } ?: "")
 
-/** The picture a row opens, as the runner picks it: the failure, then the page before a heal, then any other. */
-internal fun screenshotOf(evidence: List<StatusEvidence>): StatusEvidence? {
-    val shots = evidence.filter { it.kind != "trace" }
-    return shots.firstOrNull { it.kind == "failure" } ?: shots.firstOrNull { it.kind == "before-heal" } ?: shots.firstOrNull()
-}
+/**
+ * The picture a row opens, as the runner picks it (src/cli/ci.ts): the failure, then the page before a heal.
+ * Only those two are pictures: an API scenario's "requests" transcript is JSON.
+ */
+internal fun screenshotOf(evidence: List<StatusEvidence>): StatusEvidence? =
+    evidence.firstOrNull { it.kind == "failure" } ?: evidence.firstOrNull { it.kind == "before-heal" }
+
+/** What Open Replay steps through: the execution trace, or an API scenario's request transcript (saffron trace opens either). */
+internal fun hasReplay(evidence: List<StatusEvidence>): Boolean =
+    evidence.any { it.kind == "trace" || it.kind == "requests" }
 
 internal fun screenshotToShow(base: String, shot: StatusEvidence, scenario: String): Screenshot {
     val file = projectFile(java.nio.file.Path.of(base), shot.file)?.toFile()
@@ -149,7 +154,7 @@ class LastRunTab(project: Project, parent: Disposable) : StatusTab(project, pare
             // gone or replaced says so on the note, and jumping away would hide it.
             override fun onDoubleClick(event: MouseEvent): Boolean {
                 val a = selected() ?: return false
-                return if (a.evidence.any { it.kind != "trace" }) openScreenshot() else openScenario()
+                return if (screenshotOf(a.evidence) != null) openScreenshot() else openScenario()
             }
         }.installOn(tree)
         // A message about one row must not sit above another.
@@ -212,7 +217,7 @@ class LastRunTab(project: Project, parent: Disposable) : StatusTab(project, pare
      */
     private fun openReplay(): Boolean {
         val a = selected()
-        if (a != null && a.evidence.none { it.kind == "trace" }) {
+        if (a != null && !hasReplay(a.evidence)) {
             // An older runner has no trace setting, so following the second
             // half alone would bring this same message back.
             note.text = "No execution trace for \"${a.scenario}\". Open Replay needs saffron-ai 0.9.0 or later, with \"trace\": \"retain-on-failure\" in saffron.config.json; then run again."
