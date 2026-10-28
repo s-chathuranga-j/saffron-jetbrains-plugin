@@ -87,7 +87,8 @@ class HealthTab(project: Project, parent: Disposable) : StatusTab(project, paren
             ),
         )
         for (g in v.duplicateWordings) {
-            val group = node(Row(g.steps.first(), "+ ${g.steps.size - 1} more · ${g.actions}", AllIcons.Actions.Diff, g.actions))
+            val first = g.steps.firstOrNull() ?: continue
+            val group = node(Row(first, "+ ${g.steps.size - 1} more · ${g.actions}", AllIcons.Actions.Diff, g.actions))
             for (t in g.steps) group.add(node(Row(t, "", AllIcons.Nodes.Variable)))
             dupes.add(group)
         }

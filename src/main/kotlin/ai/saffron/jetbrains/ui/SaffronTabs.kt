@@ -3,7 +3,7 @@ package ai.saffron.jetbrains.ui
 import ai.saffron.jetbrains.run.SaffronCommand
 import ai.saffron.jetbrains.run.SaffronRunner
 import com.intellij.icons.AllIcons
-import com.intellij.execution.util.ExecUtil
+import com.intellij.execution.process.CapturingProcessHandler
 import com.intellij.openapi.Disposable
 import com.intellij.openapi.actionSystem.ActionManager
 import com.intellij.openapi.application.ApplicationManager
@@ -155,6 +155,12 @@ class ProposalsTab(project: Project, parent: Disposable) : StatusTab(project, pa
     private val diffs = mutableMapOf<String, String>()
     /** Bumped on every refresh; a diff loaded for an earlier one is discarded. */
     private var generation = 0
+    /** `saffron diff` in flight: destroyed with the tab, and when another proposal is selected. */
+    private val processes = ProcessTracker(parent)
+    /** The diff loading for the selected proposal; only touched on the EDT. */
+    private var diffLoading: CapturingProcessHandler? = null
+    private var diffLoadingKey: String? = null
+    private var diffLoadingFor = -1
 
     private fun diffKey(p: StatusProposal) = "${p.file}|${p.createdAt}"
 
@@ -203,7 +209,8 @@ class ProposalsTab(project: Project, parent: Disposable) : StatusTab(project, pa
                 false -> "UNVERIFIED"
                 null -> "unchecked"
             }
-            val state = (if (p.stale != null) "STALE · $verified" else "${p.mode} · $verified") + (p.importedFrom?.let { " · ${it.label}" } ?: "")
+            val state = (if (p.stale != null) "STALE · $verified" else "${p.mode} · $verified") + (p.importedFrom?.let { " · ${it.label}" } ?: "") +
+                (if (p.heldFromAcceptAll) " · held from Accept All" else "")
             list.addItem(p, "${p.feature.substringAfterLast('/')} › ${p.scenario}   $state", p.target in ticked)
         }
         if (items.isEmpty()) details.text = ""
@@ -218,6 +225,11 @@ class ProposalsTab(project: Project, parent: Disposable) : StatusTab(project, pa
      */
     private fun loadDiff(proposal: StatusProposal) {
         val key = diffKey(proposal)
+        // Still loading for this very proposal (the selection fired again): let it finish.
+        if (diffLoading != null && diffLoadingKey == key && diffLoadingFor == generation) return
+        // Another proposal selected: the last one's diff is no longer wanted.
+        diffLoading?.destroyProcess()
+        diffLoading = null
         diffs[key]?.let { cached ->
             details.text = describe(proposal) + cached
             details.caretPosition = 0
@@ -225,18 +237,30 @@ class ProposalsTab(project: Project, parent: Disposable) : StatusTab(project, pa
         }
         val base = projectRoot.toString()
         val loadedFor = generation
+        val handler = try {
+            CapturingProcessHandler(SaffronCommand.base(base).withParameters("diff", proposal.file)).apply { setShouldDestroyProcessRecursively(true) }
+        } catch (e: Exception) {
+            details.text = describe(proposal) + "\n\n(could not load the diff: " + (e.message ?: e.toString()) + ")"
+            return
+        }
+        diffLoading = handler
+        diffLoadingKey = key
+        diffLoadingFor = loadedFor
         ApplicationManager.getApplication().executeOnPooledThread {
             val text = try {
-                val output = ExecUtil.execAndGetOutput(SaffronCommand.base(base).withParameters("diff", proposal.file), 60_000)
+                val output = processes.tracked { it.runProcess(60_000, true) }(handler)
                 if (output.exitCode == 0 && output.stdout.isNotBlank()) {
                     "\n\nWHAT THIS PROPOSAL CHANGES\n\n" + output.stdout.trim()
                 } else {
-                    "\n\n(could not load the diff: " + runnerError(output.stderr) + ")"
+                    "\n\n(could not load the diff: " + commandProblem(output, "diff", 60) + ")"
                 }
             } catch (e: Exception) {
                 "\n\n(could not load the diff: " + (e.message ?: e.toString()) + ")"
             }
             ApplicationManager.getApplication().invokeLater({
+                // Cancelled by another selection: its answer is a killed process's, never cached.
+                if (diffLoading !== handler) return@invokeLater
+                diffLoading = null
                 // A refresh happened while this ran: the answer describes a
                 // proposal or a committed cache that may no longer exist.
                 if (loadedFor != generation) return@invokeLater

@@ -46,7 +46,6 @@ data class SaffronProjectState(
     val lastRun: LastRun?,
     val pendingProposals: Int,
     val packageInstalled: Boolean,
-    val hasReport: Boolean,
     /** The test folder [files] were scanned in. */
     val featuresDir: Path? = null,
 )
@@ -115,7 +114,6 @@ object SaffronProjectScan {
             lastRun = readLastRun(reports),
             pendingProposals = countProposals(base.resolve(".saffron/proposals")),
             packageInstalled = SaffronCommand.installedPackage(base.toString()) != null,
-            hasReport = Files.exists(base.resolve(".saffron/reports/latest.html")),
             featuresDir = features,
         )
     }
@@ -227,9 +225,12 @@ object SaffronProjectScan {
         }.getOrNull()
     }
 
-    private fun countProposals(dir: Path): Int {
+    /** The runner's listProposals: the .json files in each proposals/<feature> folder, two levels and no deeper. */
+    internal fun countProposals(dir: Path): Int {
         if (!dir.isDirectory()) return 0
-        return Files.walk(dir).use { s -> s.filter { it.extension == "json" }.count().toInt() }
+        return Files.list(dir).use { features ->
+            features.filter { it.isDirectory() }.toList().sumOf { f -> Files.list(f).use { s -> s.filter { it.name.endsWith(".json") }.count().toInt() } }
+        }
     }
 }
 

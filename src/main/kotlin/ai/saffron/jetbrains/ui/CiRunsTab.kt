@@ -43,7 +43,6 @@ import org.cef.browser.CefFrame
 import org.cef.handler.CefRequestHandlerAdapter
 import org.cef.network.CefRequest
 import java.time.Instant
-import java.util.concurrent.ConcurrentHashMap
 import javax.swing.Icon
 import javax.swing.JPanel
 import javax.swing.JTree
@@ -395,8 +394,7 @@ class CiRunsTab(
     private val loading = mutableSetOf<Path>()
     private val again = mutableSetOf<Path>()
     /** CLI processes in flight: destroyed when the tab goes with its project. */
-    private val processes = ConcurrentHashMap.newKeySet<CapturingProcessHandler>()
-    @Volatile private var disposed = false
+    private val processes = ProcessTracker(parent)
     /** The tab's own message (an import's summary): it outlasts status reloads until the selection changes. */
     private var ownNote: String? = null
     /** Set while [rebuild] replaces the rows: that selection change is not the user's. */
@@ -494,8 +492,6 @@ class CiRunsTab(
             add(browser?.let { b -> JBSplitter(true, 0.45f).apply { firstComponent = runs; secondComponent = b.component } } ?: runs, BorderLayout.CENTER)
         })
         Disposer.register(parent) {
-            disposed = true
-            processes.forEach { it.destroyProcess() }
             headWatch?.let { LocalFileSystem.getInstance().removeWatchedRoot(it) }
         }
         // Another branch checked out: its runs, not the last branch's.
@@ -514,17 +510,6 @@ class CiRunsTab(
         ownNote?.let { note.text = it }
         // Not listed yet (trust granted since), or another project chosen: its runs, never the last project's.
         if (listedFor != projectRoot) loadRuns(refresh = false) else rebuild()
-    }
-
-    /** Runs [wait] on a process the tab can destroy on disposal; forgets it once done. */
-    private fun tracked(wait: (CapturingProcessHandler) -> ProcessOutput): (CapturingProcessHandler) -> ProcessOutput = { handler ->
-        processes += handler
-        try {
-            if (disposed) handler.destroyProcess()
-            wait(handler)
-        } finally {
-            processes -= handler
-        }
     }
 
     private fun say(text: String) {
@@ -565,7 +550,7 @@ class CiRunsTab(
         val version = latest?.version
         ApplicationManager.getApplication().executeOnPooledThread {
             // The runner gives each gh or az call 10 minutes and may make several: 30 minutes stops only one that hangs.
-            val (runs, problem) = saffronJson(base.toString(), CiRuns::class.java, "runs", "--json", version = version, run = tracked { it.runProcess(30 * 60_000, true) })
+            val (runs, problem) = saffronJson(base.toString(), CiRuns::class.java, "runs", "--json", version = version, run = processes.tracked { it.runProcess(30 * 60_000, true) })
             ApplicationManager.getApplication().invokeLater({
                 loading.remove(base)
                 // Not the latest list of this root, or listed for a project no longer shown: dropped.
@@ -600,7 +585,7 @@ class CiRunsTab(
             // Loaded into the VFS, or no change to it is ever reported.
             fs.refreshAndFindFileByNioFile(file)
             ApplicationManager.getApplication().invokeLater({
-                if (headFor != base || disposed) {
+                if (headFor != base || processes.disposed) {
                     request?.let { fs.removeWatchedRoot(it) }
                     return@invokeLater
                 }
@@ -734,7 +719,7 @@ class CiRunsTab(
             private var answer: Pair<RunView?, String?> = null to null
 
             override fun run(indicator: ProgressIndicator) {
-                answer = saffronJson(base.toString(), RunView::class.java, *args.toTypedArray(), version = version, run = tracked { it.runProcessWithProgressIndicator(indicator) })
+                answer = saffronJson(base.toString(), RunView::class.java, *args.toTypedArray(), version = version, run = processes.tracked { it.runProcessWithProgressIndicator(indicator) })
             }
 
             override fun onCancel() {
@@ -854,7 +839,7 @@ class CiRunsTab(
             private var answer: Pair<RunImport?, String?> = null to null
 
             override fun run(indicator: ProgressIndicator) {
-                answer = saffronJson(base.toString(), RunImport::class.java, "import", "--run", run.id, "--json", version = version, run = tracked { it.runProcessWithProgressIndicator(indicator) })
+                answer = saffronJson(base.toString(), RunImport::class.java, "import", "--run", run.id, "--json", version = version, run = processes.tracked { it.runProcessWithProgressIndicator(indicator) })
             }
 
             override fun onCancel() {

@@ -1,7 +1,7 @@
 package ai.saffron.jetbrains.ui
 
 import ai.saffron.jetbrains.run.SaffronCommand
-import com.intellij.execution.util.ExecUtil
+import com.intellij.execution.process.CapturingProcessHandler
 import com.intellij.icons.AllIcons
 import com.intellij.openapi.Disposable
 import com.intellij.openapi.application.ApplicationManager
@@ -27,6 +27,9 @@ import javax.swing.JPanel
  * flaky, never run, healing, timing, tags. A scenario's name opens it.
  */
 class DashboardTab(project: Project, parent: Disposable) : StatusTab(project, parent) {
+
+    /** `saffron dashboard` in flight: destroyed when the tab goes with its project. */
+    private val processes = ProcessTracker(parent)
 
     // An IDE whose JCEF classes this plugin cannot load (not installed, or
     // not visible to it) gets a message, not a crash.
@@ -103,9 +106,10 @@ class DashboardTab(project: Project, parent: Disposable) : StatusTab(project, pa
                 ApplicationManager.getApplication().executeOnPooledThread {
                     var rendered = false
                     val page = try {
-                        val out = ExecUtil.execAndGetOutput(SaffronCommand.base(base).withParameters("dashboard", "--stdout"), 60_000)
+                        val handler = CapturingProcessHandler(SaffronCommand.base(base).withParameters("dashboard", "--stdout")).apply { setShouldDestroyProcessRecursively(true) }
+                        val out = processes.tracked { it.runProcess(60_000, true) }(handler)
                         if (out.exitCode == 0 && out.stdout.isNotBlank()) withOpener(out.stdout, js).also { rendered = true }
-                        else message("Could not load the dashboard: ${runnerError(out.stderr)}")
+                        else message("Could not load the dashboard: ${commandProblem(out, "dashboard", 60)}")
                     } catch (e: Exception) {
                         message("Could not load the dashboard: ${e.message ?: e}")
                     }

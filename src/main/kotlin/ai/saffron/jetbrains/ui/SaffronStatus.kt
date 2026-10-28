@@ -4,9 +4,11 @@ import ai.saffron.jetbrains.run.SaffronCommand
 import com.google.gson.Gson
 import com.google.gson.JsonObject
 import com.intellij.execution.configurations.GeneralCommandLine
-import com.intellij.execution.util.ExecUtil
+import com.intellij.execution.process.CapturingProcessHandler
+import com.intellij.execution.process.ProcessOutput
 import com.intellij.ide.util.PropertiesComponent
 import com.intellij.openapi.Disposable
+import com.intellij.openapi.util.Disposer
 import com.intellij.openapi.application.ApplicationManager
 import com.intellij.openapi.application.PathManager
 import com.intellij.openapi.components.Service
@@ -14,6 +16,7 @@ import com.intellij.openapi.project.Project
 import com.intellij.util.Alarm
 import com.intellij.util.messages.Topic
 import java.nio.file.Path
+import java.util.concurrent.ConcurrentHashMap
 import java.util.concurrent.atomic.AtomicBoolean
 
 /**
@@ -69,7 +72,17 @@ class StatusProposal(
      * decided unseen. A plain file for an older runner.
      */
     val target: String get() = if (revision != null) "$file#$revision" else file
+
+    /**
+     * Whether `saffron accept --all` leaves this proposal to be accepted by file, as the runner
+     * decides: unverified or not checked, imported from CI, or a note its HELD_FOR_REVIEW names.
+     */
+    val heldFromAcceptAll: Boolean
+        get() = verified != true || importedFrom != null || adaptations.any { a -> HELD_NOTES.any { a.startsWith(it) } }
 }
+
+/** The runner's HELD_FOR_REVIEW note prefixes (src/cli/index.ts). */
+private val HELD_NOTES = listOf("behavior change:", "insensitive check:", "volatile locator:")
 
 /** Where an imported proposal came from: the run ("github:901") and its link, the branch and commit, the shard. */
 class ImportedFrom(
@@ -227,12 +240,20 @@ class ProjectStatus(
     val vocabulary: StatusVocabulary = StatusVocabulary(),
     /** Null when the runner predates `saffron prune`: absent, not empty. */
     val orphans: List<StatusOrphan>? = null,
-    /** Absent from older runners; incomplete means [orphans] is empty because the scan stopped. */
+    /**
+     * Absent from older runners. Incomplete while a file fails to parse: [orphans] still lists
+     * other files' orphans, and the recordings the broken file may own are in [OrphanScan.ownershipUnknown].
+     */
     val orphanScan: OrphanScan? = null,
 )
 
-/** Whether the orphan scan could read every owner, and what stopped it. */
-class OrphanScan(val complete: Boolean = true, val errors: List<String> = emptyList())
+/** Whether the orphan scan could judge every owner, what stopped it, and the recordings it could not judge. */
+class OrphanScan(
+    val complete: Boolean = true,
+    val errors: List<String> = emptyList(),
+    /** Absent from older runners: recordings a file that fails to parse may own; prune deletes nothing until it parses. */
+    val ownershipUnknown: List<StatusOrphan> = emptyList(),
+)
 
 /** Result of one load: the status, or why it is unavailable, and the project root it is for. */
 class StatusLoad(val status: ProjectStatus?, val error: String?, val root: Path? = null)
@@ -296,7 +317,7 @@ class SaffronStatusService(private val project: Project) : Disposable {
             discoverRoots()
             val shown = root
             val trusted = SaffronCommand.trusted(project)
-            val loaded = if (trusted) runStatus(shown.toString()) else StatusLoad(null, UNTRUSTED)
+            val loaded = if (trusted) runStatus(shown.toString(), processes.tracked { it.runProcess(STATUS_TIMEOUT_MS, true) }) else StatusLoad(null, UNTRUSTED)
             // Load once the project is trusted, not only at the next refresh. The platform's
             // trust listener is experimental API, so the check (no process) repeats instead.
             if (!trusted) awaitTrust()
@@ -318,6 +339,9 @@ class SaffronStatusService(private val project: Project) : Disposable {
         alarm.addRequest({ if (SaffronCommand.trusted(project)) refresh() else awaitTrust() }, UNTRUSTED_RECHECK_MS)
     }
 
+    /** `saffron status` in flight: destroyed with the project. */
+    private val processes = ProcessTracker(this)
+
     override fun dispose() {}
 
     companion object {
@@ -331,14 +355,19 @@ class SaffronStatusService(private val project: Project) : Disposable {
 
         fun getInstance(project: Project): SaffronStatusService = project.getService(SaffronStatusService::class.java)
 
-        /** `saffron status --json` for a project directory; never throws. */
-        fun runStatus(basePath: String?): StatusLoad {
+        private const val STATUS_TIMEOUT_MS = 60_000
+
+        /** `saffron status --json` for a project directory; never throws. [run] starts the process and waits for it. */
+        fun runStatus(
+            basePath: String?,
+            run: (CapturingProcessHandler) -> ProcessOutput = { it.runProcess(STATUS_TIMEOUT_MS, true) },
+        ): StatusLoad {
             basePath ?: return StatusLoad(null, "no project directory")
             return try {
                 val command: GeneralCommandLine = SaffronCommand.base(basePath).withParameters("status", "--json")
-                val output = ExecUtil.execAndGetOutput(command, 60_000)
+                val output = run(CapturingProcessHandler(command).apply { setShouldDestroyProcessRecursively(true) })
                 if (output.exitCode != 0 || output.stdout.isBlank()) {
-                    StatusLoad(null, output.stderr.takeIf { it.isNotBlank() }?.let(::runnerError) ?: "saffron status exited with ${output.exitCode}")
+                    StatusLoad(null, commandProblem(output, "status", STATUS_TIMEOUT_MS / 1000))
                 } else {
                     StatusLoad(Gson().fromJson(output.stdout, ProjectStatus::class.java), null)
                 }
@@ -363,6 +392,39 @@ internal fun runnerError(stderr: String): String {
         ?: rest.firstOrNull { it.contains("error", ignoreCase = true) }
         ?: rest.firstOrNull()
         ?: lines.lastOrNull().orEmpty()
+}
+
+/**
+ * Why `saffron <command>` gave no answer: stopped at its [timeoutSeconds] limit, the
+ * runner's own error line, or else its exit code.
+ */
+internal fun commandProblem(output: ProcessOutput, command: String, timeoutSeconds: Int): String =
+    if (output.isTimeout) "saffron $command was stopped after $timeoutSeconds seconds. Run it in a terminal to see where it waits."
+    else runnerError(output.stderr).ifBlank { "saffron $command exited with ${output.exitCode}" }
+
+/** CLI processes in flight, destroyed when [parent] (a tab, or the project) is disposed. */
+internal class ProcessTracker(parent: Disposable) {
+    private val processes = ConcurrentHashMap.newKeySet<CapturingProcessHandler>()
+    @Volatile var disposed = false
+        private set
+
+    init {
+        Disposer.register(parent) {
+            disposed = true
+            processes.forEach { it.destroyProcess() }
+        }
+    }
+
+    /** Runs [wait] on a process destroyed on disposal; forgets it once done. */
+    fun tracked(wait: (CapturingProcessHandler) -> ProcessOutput): (CapturingProcessHandler) -> ProcessOutput = { handler ->
+        processes += handler
+        try {
+            if (disposed) handler.destroyProcess()
+            wait(handler)
+        } finally {
+            processes -= handler
+        }
+    }
 }
 
 /** Whether a runner version ("0.9.1", "0.10.0-beta.1") is at least major.minor.patch. */

@@ -1,3 +1,13 @@
+<h3>Unreleased</h3>
+<ul>
+  <li>The Accept All tooltips name every proposal <code>saffron accept --all</code> leaves for review: heals that change what a step enters, recordings with a check that passes either way, and recordings with a locator a later day will not find, besides unverified, unchecked and CI-imported ones.</li>
+  <li>The Proposals tab marks each proposal Accept All will skip with "held from Accept All", and the Saffron panel says how many of the pending proposals are held.</li>
+  <li>While a feature file fails to parse, the Orphans tab still lists the other files' orphaned recordings, with a warning naming the file, and lists the broken file's recordings under "Ownership unknown until it parses". Remove All still refuses until it parses, as <code>saffron prune</code> does.</li>
+  <li>A status, diff or dashboard command that runs past its time limit says it was stopped after 60 seconds, and one that fails without a message says its exit code, instead of an empty reason.</li>
+  <li>Status, diff and dashboard commands stop when the project closes, and selecting another proposal stops the diff still loading for the last one.</li>
+  <li>The Saffron panel's pending count before the status loads counts the files the runner lists as proposals (<code>.saffron/proposals/&lt;feature&gt;/*.json</code>), not every JSON file below that folder.</li>
+  <li>A duplicate wording group without steps no longer breaks the Health tab.</li>
+</ul>
 <h3>0.7.4</h3>
 <ul>
   <li>Last Run never opens an API scenario's request transcript as a screenshot: only the failure and before-heal pictures open as one, as the runner picks them. Such a row offers Open Replay, which steps through the requests it sent (needs <code>saffron-ai</code> 1.2.0).</li>

@@ -67,6 +67,8 @@ class SaffronPanel(private val project: Project, parent: Disposable) : SimpleToo
     private var state: SaffronProjectState? = null
     /** Pending review from the status: listed proposals plus unreadable ones; null until it loads. */
     private var pendingFromStatus: Int? = null
+    /** Of those, the ones Accept All leaves for review by file (unreadable ones too); 0 until the status loads. */
+    private var heldFromStatus = 0
     private var scannedRoot: java.nio.file.Path? = null
     /** The root the files on screen were scanned for. */
     private var shownRoot: java.nio.file.Path? = null
@@ -111,6 +113,7 @@ class SaffronPanel(private val project: Project, parent: Disposable) : SimpleToo
         })
         connection.subscribe(SaffronStatusService.TOPIC, StatusListener { load ->
             pendingFromStatus = load.status?.let { it.proposals.size + it.unreadableProposals.size }
+            heldFromStatus = load.status?.let { st -> st.proposals.count { it.heldFromAcceptAll } + st.unreadableProposals.size } ?: 0
             // Another project chosen, or another test folder: its files, not the last one's.
             if (service.root != scannedRoot ||
                 SaffronProjectScan.testFolderMoved(service.root, state?.featuresDir, load.status?.featuresDir)
@@ -256,10 +259,11 @@ class SaffronPanel(private val project: Project, parent: Disposable) : SimpleToo
         status.text = s.lastRun?.let { it.summary(ago(it.finishedAt)) } ?: "No runs yet."
         // The status knows unreadable proposals too; the file count is the fallback until it loads.
         val pendingCount = pendingFromStatus ?: s.pendingProposals
+        val held = if (pendingFromStatus != null && heldFromStatus > 0) ", $heldFromStatus held from Accept All" else ""
         pending.text = when (pendingCount) {
             0 -> "No proposals pending review."
-            1 -> "1 proposal pending review (Accept All Proposals, or saffron accept)."
-            else -> "$pendingCount proposals pending review (Accept All Proposals, or saffron accept)."
+            1 -> "1 proposal pending review$held (Accept All Proposals, or saffron accept)."
+            else -> "$pendingCount proposals pending review$held (Accept All Proposals, or saffron accept)."
         }
         hint.text = if (s.packageInstalled) "" else "saffron-ai is not installed here: runs fall back to npx. Run npm i -D saffron-ai."
     }

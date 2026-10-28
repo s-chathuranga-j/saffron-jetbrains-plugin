@@ -651,6 +651,10 @@ class SaffronRunConfigurationTest : BasePlatformTestCase() {
         Files.createDirectories(dir.resolve(".saffron/reports"))
         Files.createDirectories(dir.resolve(".saffron/proposals/login-saffron"))
         Files.writeString(dir.resolve(".saffron/proposals/login-saffron/a.json"), "{}")
+        // The runner lists proposals/<feature>/*.json only: neither a file beside the feature folders nor one deeper is a proposal.
+        Files.writeString(dir.resolve(".saffron/proposals/stray.json"), "{}")
+        Files.createDirectories(dir.resolve(".saffron/proposals/login-saffron/old"))
+        Files.writeString(dir.resolve(".saffron/proposals/login-saffron/old/b.json"), "{}")
         Files.writeString(dir.resolve(".saffron/reports/latest.html"), "<html></html>")
         Files.writeString(
             dir.resolve(".saffron/reports/latest.json"),
@@ -667,7 +671,6 @@ class SaffronRunConfigurationTest : BasePlatformTestCase() {
         assertEquals(1.5, state.lastRun!!.costUsd)
         assertEquals(1, state.pendingProposals)
         assertTrue(state.packageInstalled)
-        assertTrue(state.hasReport)
     }
 
     fun `test the scan and right-click Run keep to the configured test folder`() {

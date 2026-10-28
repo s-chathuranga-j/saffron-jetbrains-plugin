@@ -25,6 +25,9 @@ object SaffronScenarioRun {
         }
     }
 
+    /** The file of a `file:name` target, as the runner splits it: a name may hold ":". */
+    internal fun fileOf(target: String): String = Regex("""^(.+?\.(?:saffron|feature)):""").find(target)?.groupValues?.get(1) ?: target
+
     /**
      * The lens's configuration, through [SaffronRunner.prepare]: a temporary
      * one of that name is reused and reset, a saved one is the user's and is
@@ -33,9 +36,6 @@ object SaffronScenarioRun {
      * name of its own: rewriting that one's configuration would change what
      * its Run tab reruns.
      */
-    /** The file of a `file:name` target, as the runner splits it: a name may hold ":". */
-    internal fun fileOf(target: String): String = Regex("""^(.+?\.(?:saffron|feature)):""").find(target)?.groupValues?.get(1) ?: target
-
     fun configuration(project: Project, root: String, target: String, scenario: String, mode: String): RunnerAndConfigurationSettings {
         val dir = FileUtil.toSystemIndependentName(root)
         val paths = SaffronCommand.joinPaths(listOf(target))

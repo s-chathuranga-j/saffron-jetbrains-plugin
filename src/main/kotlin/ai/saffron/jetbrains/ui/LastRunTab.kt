@@ -27,12 +27,6 @@ import javax.swing.tree.DefaultTreeModel
 /** What opening a row's screenshot comes to: the file to show, or why there is none. */
 internal class Screenshot(val file: VirtualFile? = null, val problem: String? = null)
 
-/**
- * Reads, checks and copies a row's picture, then finds the copy in the VFS.
- * Disk work that takes long enough on a WSL path or a network share, with a
- * full-page picture, to freeze the IDE, so it is never run on the UI thread.
- */
-/** A browser matrix lists a scenario once per browser: the label says which. */
 /** What the tab says when it lists no scenario. An interrupted run never reads as everything passed. */
 internal fun lastRunEmptyText(status: ProjectStatus?): String {
     val run = status?.lastRun
@@ -46,6 +40,7 @@ internal fun lastRunEmptyText(status: ProjectStatus?): String {
     }
 }
 
+/** A browser matrix lists a scenario once per browser: the label says which. */
 internal fun attentionLabel(a: StatusAttention, matrix: Boolean): String =
     if (matrix && a.browser != null) "${a.scenario} · ${a.browser}" else a.scenario
 
@@ -68,6 +63,11 @@ internal fun screenshotOf(evidence: List<StatusEvidence>): StatusEvidence? =
 internal fun hasReplay(evidence: List<StatusEvidence>): Boolean =
     evidence.any { it.kind == "trace" || it.kind == "requests" }
 
+/**
+ * Reads, checks and copies a row's picture, then finds the copy in the VFS.
+ * Disk work that takes long enough on a WSL path or a network share, with a
+ * full-page picture, to freeze the IDE, so it is never run on the UI thread.
+ */
 internal fun screenshotToShow(base: String, shot: StatusEvidence, scenario: String): Screenshot {
     val file = projectFile(java.nio.file.Path.of(base), shot.file)?.toFile()
         ?: return Screenshot(problem = "Not opened: ${shot.file} is outside the project.")

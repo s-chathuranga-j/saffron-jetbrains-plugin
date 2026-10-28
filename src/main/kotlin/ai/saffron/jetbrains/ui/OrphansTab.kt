@@ -96,49 +96,52 @@ class OrphansTab(project: Project, parent: Disposable) : StatusTab(project, pare
             return
         }
         count = orphans.size
-        // The scan stops on any file it cannot read, inside the features
-        // folder or not: an empty list then says nothing about the project.
-        unknown = status.orphanScan?.takeIf { !it.complete }
-            ?.let { "Orphaned recordings not checked: ${it.errors.firstOrNull() ?: "the scan could not finish"}" }
-            ?: status.features.firstOrNull { it.error != null }?.let { "Unknown until ${it.path} parses" }
-        if (unknown != null) {
-            tree.emptyText.text = unknown!!
-            model.reload()
-            return
+        val scan = status.orphanScan
+        if (scan == null) {
+            // An older runner's scan stops on a file it cannot read: an empty list then says nothing.
+            unknown = status.features.firstOrNull { it.error != null }?.let { "Unknown until ${it.path} parses" }
+            if (unknown != null) {
+                tree.emptyText.text = unknown!!
+                model.reload()
+                return
+            }
+        } else if (!scan.complete) {
+            // The runner still lists other files' orphans; the broken file's recordings are
+            // ownership unknown, and prune deletes nothing until it parses (Remove All refuses too).
+            unknown = "Orphaned recordings not checked: ${scan.errors.firstOrNull() ?: "the scan could not finish"}"
+            root.add(DefaultMutableTreeNode(OrphanRow(unknown!!, icon = AllIcons.General.Warning, tooltip = unknown)))
         }
-        tree.emptyText.text = "Every recording belongs to a scenario"
+        tree.emptyText.text = unknown ?: "Every recording belongs to a scenario"
         for ((kind, label) in listOf("cache" to "Caches", "proposal" to "Pending proposals", "artifact" to "Screenshot folders")) {
             val group = orphans.filter { it.kind == kind }
             if (group.isEmpty()) continue
             val parent = DefaultMutableTreeNode(OrphanRow(label, "${group.size}", AllIcons.Nodes.Folder))
-            for (o in group) {
-                parent.add(
-                    DefaultMutableTreeNode(
-                        if (kind == "artifact") {
-                            // A folder of pictures: nothing to open as a file.
-                            OrphanRow(
-                                o.file.split('/').takeLast(2).joinToString("/"),
-                                "failure screenshots of a scenario that is gone",
-                                AllIcons.FileTypes.Image,
-                                o.file,
-                            )
-                        } else {
-                            OrphanRow(
-                                o.scenario ?: o.file.substringAfterLast('/'),
-                                "${o.feature ?: ""} · ${why(o.reason)}".trim(' ', '·'),
-                                AllIcons.General.Warning,
-                                tooltipHtml(o.file, why(o.reason), "Double-click to open the recording."),
-                                o.file,
-                            )
-                        },
-                    ),
-                )
-            }
+            for (o in group) parent.add(DefaultMutableTreeNode(row(o, why(o.reason))))
+            root.add(parent)
+        }
+        val unowned = scan?.takeIf { !it.complete }?.ownershipUnknown.orEmpty()
+        if (unowned.isNotEmpty()) {
+            val parent = DefaultMutableTreeNode(OrphanRow("Ownership unknown until it parses", "${unowned.size}", AllIcons.Nodes.Folder))
+            for (o in unowned) parent.add(DefaultMutableTreeNode(row(o, "its feature file does not parse, so its scenarios are unknown")))
             root.add(parent)
         }
         model.reload()
         TreeUtil.expandAll(tree)
     }
+
+    private fun row(o: StatusOrphan, why: String): OrphanRow =
+        if (o.kind == "artifact") {
+            // A folder of pictures: nothing to open as a file.
+            OrphanRow(o.file.split('/').takeLast(2).joinToString("/"), "failure screenshots of a scenario that is gone", AllIcons.FileTypes.Image, o.file)
+        } else {
+            OrphanRow(
+                o.scenario ?: o.file.substringAfterLast('/'),
+                "${o.feature ?: ""} · $why".trim(' ', '·'),
+                AllIcons.General.Warning,
+                tooltipHtml(o.file, why, "Double-click to open the recording."),
+                o.file,
+            )
+        }
 
     private fun why(reason: String): String = when (reason) {
         "feature-gone" -> "the feature file is gone"

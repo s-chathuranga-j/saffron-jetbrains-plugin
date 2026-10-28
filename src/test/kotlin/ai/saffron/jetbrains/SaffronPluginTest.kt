@@ -524,12 +524,12 @@ class SaffronPluginTest : BasePlatformTestCase() {
             PlatformTestUtil.waitWithEventsDispatching("no refusal", { note.text == "e2e #20261001.41 was not imported: the bundle is from another repository" }, 60)
             assertEquals(listOf("the bundle is from another repository"), (0 until runRows()[0].childCount).map { runRows()[0].getChildAt(it).toString() })
 
-            // Proposals names the run each imported proposal came from.
+            // Proposals names the run each imported proposal came from, and that Accept All leaves it for review.
             val proposals = ProposalsTab(project, testRootDisposable)
             @Suppress("UNCHECKED_CAST")
             val list = UIUtil.findComponentOfType(proposals, CheckBoxList::class.java) as CheckBoxList<StatusProposal>
             PlatformTestUtil.waitWithEventsDispatching("the proposals never loaded", { list.itemsCount == 1 }, 60)
-            assertTrue(list.model.getElementAt(0).text, list.model.getElementAt(0).text.endsWith("heal · verified · from run 41"))
+            assertTrue(list.model.getElementAt(0).text, list.model.getElementAt(0).text.endsWith("heal · verified · from run 41 · held from Accept All"))
             val from = list.getItemAt(0)!!.importedFrom!!
             assertEquals("imported from run azure:41 (https://dev.azure.com/acme/shop/_build/results?buildId=41) · on feature/login @ abc1234", from.description)
         } finally {
@@ -915,7 +915,6 @@ class SaffronPluginTest : BasePlatformTestCase() {
         }
     }
 
-    /** A stand-in `saffron` in [dir] from a whole shell `case` body. */
     fun `test Orphans reports unknown ownership until features parse and blocks removal`() {
         if (SystemInfo.isWindows) return
         val base = Path.of(project.basePath!!)
@@ -949,6 +948,57 @@ class SaffronPluginTest : BasePlatformTestCase() {
         } finally { Files.deleteIfExists(base.resolve("node_modules/.bin/saffron")) }
     }
 
+    fun `test Orphans lists other files' orphans and ownership unknown while a file fails to parse`() {
+        if (SystemInfo.isWindows) return
+        val base = Path.of(project.basePath!!)
+        try {
+            val orphan = """{"file":".saffron/cache/gone-saffron/old.json","kind":"cache","feature":"features/gone.saffron","scenario":"Old","reason":"feature-gone"}"""
+            val unowned = """{"file":".saffron/cache/broken-saffron/b.json","kind":"cache","feature":"features/broken.saffron","scenario":"B","reason":"scenario-gone"}"""
+            standInCases(
+                base,
+                """  status) echo '{"packageInstalled":true,"features":[{"path":"features/broken.saffron","error":"Missing StepSet"}],"orphans":[$orphan],"orphanScan":{"complete":false,"errors":["features/broken.saffron: Missing StepSet"],"ownershipUnknown":[$unowned]}}' ;;""",
+            )
+            val tab = OrphansTab(project, testRootDisposable)
+            val tree = UIUtil.findComponentOfType(tab, Tree::class.java)!!
+            val root = tree.model.root as javax.swing.tree.DefaultMutableTreeNode
+            fun labels() = root.children().toList().map { it.toString() }
+            val warning = "Orphaned recordings not checked: features/broken.saffron: Missing StepSet"
+            PlatformTestUtil.waitWithEventsDispatching(
+                "the other files' orphans were hidden",
+                { labels() == listOf(warning, "Caches", "Ownership unknown until it parses") },
+                60,
+            )
+            assertEquals("Old", root.getChildAt(1).getChildAt(0).toString())
+            assertEquals("B", root.getChildAt(2).getChildAt(0).toString())
+            // prune deletes nothing until the file parses: Remove All refuses as well.
+            val toolbar = UIUtil.findComponentOfType(tab.toolbar as JComponent, ActionToolbarImpl::class.java)!!
+            val remove = (toolbar.actionGroup as DefaultActionGroup).childActionsOrStubs.single { it.templateText == "Remove All" }
+            remove.actionPerformed(TestActionEvent.createTestEvent(remove))
+            assertEquals(warning, UIUtil.findComponentOfType(tab, com.intellij.ui.components.JBLabel::class.java)!!.text)
+        } finally { Files.deleteIfExists(base.resolve("node_modules/.bin/saffron")) }
+    }
+
+    fun `test a proposal Accept All skips is marked as held, as the runner decides`() {
+        fun held(json: String) = Gson().fromJson(json, StatusProposal::class.java).heldFromAcceptAll
+        assertFalse(held("""{"verified":true,"adaptations":["healed step 2"]}"""))
+        assertTrue(held("""{"verified":false}"""))
+        assertTrue(held("""{}"""))
+        assertTrue(held("""{"verified":true,"importedFrom":{"label":"github:1"}}"""))
+        for (note in listOf("behavior change: x", "insensitive check: x", "volatile locator: x")) {
+            assertTrue(note, held("""{"verified":true,"adaptations":["$note"]}"""))
+        }
+    }
+
+    fun `test a command stopped at its time limit, or failing silently, says so`() {
+        val timedOut = com.intellij.execution.process.ProcessOutput().apply { setTimeout() }
+        assertEquals("saffron diff was stopped after 60 seconds. Run it in a terminal to see where it waits.", ai.saffron.jetbrains.ui.commandProblem(timedOut, "diff", 60))
+        val silent = com.intellij.execution.process.ProcessOutput().apply { exitCode = 3 }
+        assertEquals("saffron status exited with 3", ai.saffron.jetbrains.ui.commandProblem(silent, "status", 60))
+        val said = com.intellij.execution.process.ProcessOutput("", "Error: boom\nNode.js v22.3.0", 1, false, false)
+        assertEquals("Error: boom", ai.saffron.jetbrains.ui.commandProblem(said, "dashboard", 60))
+    }
+
+    /** A stand-in `saffron` in [dir] from a whole shell `case` body. */
     private fun standInCases(dir: Path, cases: String) {
         val bin = dir.resolve("node_modules/.bin/saffron")
         Files.createDirectories(bin.parent)
