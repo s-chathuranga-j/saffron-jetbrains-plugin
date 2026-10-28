@@ -82,7 +82,7 @@ class StatusProposal(
 }
 
 /** The runner's HELD_FOR_REVIEW note prefixes (src/cli/index.ts). */
-private val HELD_NOTES = listOf("behavior change:", "insensitive check:", "volatile locator:")
+private val HELD_NOTES = listOf("behavior change:", "insensitive check:", "volatile locator:", "requirement not kept:")
 
 /** Where an imported proposal came from: the run ("github:901") and its link, the branch and commit, the shard. */
 class ImportedFrom(

@@ -168,7 +168,7 @@ class ProposalsTab(project: Project, parent: Disposable) : StatusTab(project, pa
         toolbar = toolbar(
             action("Accept Selected", "saffron accept <ticked files>", AllIcons.Actions.Commit) { act("accept", ticked()) },
             action("Reject Selected", "saffron reject <ticked files>", AllIcons.Actions.Cancel) { act("reject", ticked()) },
-            action("Accept All", "saffron accept --all (skips proposals that are unverified, not checked, imported from CI, change what a step enters, have a check that passes either way or a locator a later day will not find)", AllIcons.Actions.Checked) { acceptAll() },
+            action("Accept All", "saffron accept --all (skips proposals that are unverified, not checked, imported from CI, change what a step enters or drop a request or check it made, have a check that passes either way or a locator a later day will not find)", AllIcons.Actions.Checked) { acceptAll() },
             action("Refresh", "Reload the status", AllIcons.Actions.Refresh) { refreshStatus() },
         )
         list.setEmptyText("No proposals pending review")

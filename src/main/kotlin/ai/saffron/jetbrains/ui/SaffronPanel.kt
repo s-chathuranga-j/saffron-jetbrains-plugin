@@ -127,7 +127,7 @@ class SaffronPanel(private val project: Project, parent: Disposable) : SimpleToo
             action("Run All", "saffron run over every feature file", AllIcons.Actions.RunAll) { runAll() },
             action("Run Selected", "saffron run over the checked files", AllIcons.Actions.Execute) { runSelected() },
             action("Open Report", "Open the latest HTML report in the browser", AllIcons.Actions.Preview) { openReport() },
-            action("Accept All Proposals", "saffron accept --all: promote pending proposals to committed caches, except unverified, not checked and CI-imported ones, heals that change what a step enters, and recordings with a check that passes either way or a locator a later day will not find", AllIcons.Actions.Commit) { acceptAll() },
+            action("Accept All Proposals", "saffron accept --all: promote pending proposals to committed caches, except unverified, not checked and CI-imported ones, heals that change what a step enters or drop a request or check it made, and recordings with a check that passes either way or a locator a later day will not find", AllIcons.Actions.Commit) { acceptAll() },
             action("Refresh", "Rescan feature files and the latest report", AllIcons.Actions.Refresh) { refresh() },
         )
         val toolbar = ActionManager.getInstance().createActionToolbar("SaffronToolWindow", group, true)
