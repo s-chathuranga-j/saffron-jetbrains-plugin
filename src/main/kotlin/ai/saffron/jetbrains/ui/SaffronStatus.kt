@@ -52,6 +52,8 @@ class StatusProposal(
     val createdAt: String = "",
     val verified: Boolean? = null,
     val proofError: String? = null,
+    /** The Examples rows an Outline's proposal failed on, its proof having passed where it was recorded. */
+    val failedRows: List<String>? = null,
     /** Why the proposal can no longer be accepted as reviewed; null while it is still bound to what it was made against. */
     val stale: String? = null,
     val unbound: Boolean? = null,
@@ -82,7 +84,7 @@ class StatusProposal(
 }
 
 /** The runner's HELD_FOR_REVIEW note prefixes (src/cli/index.ts). */
-private val HELD_NOTES = listOf("behavior change:", "insensitive check:", "volatile locator:", "requirement not kept:", "unstable recording:", "row not proved:", "date not following the clock:", "write not finished:")
+private val HELD_NOTES = listOf("behavior change:", "insensitive check:", "volatile locator:", "requirement not kept:", "unstable recording:", "row not proved:", "date not following the clock:", "write not finished:", "check changed the page:")
 
 /** Where an imported proposal came from: the run ("github:901") and its link, the branch and commit, the shard. */
 class ImportedFrom(

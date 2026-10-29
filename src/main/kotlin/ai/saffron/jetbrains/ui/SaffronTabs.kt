@@ -205,7 +205,7 @@ class ProposalsTab(project: Project, parent: Disposable) : StatusTab(project, pa
         list.clear()
         for (p in items) {
             val verified = when (p.verified) {
-                true -> "verified"
+                true -> if (p.failedRows.isNullOrEmpty()) "verified" else "FAILS A ROW"
                 false -> "UNVERIFIED"
                 null -> "unchecked"
             }
@@ -311,7 +311,7 @@ class ProposalsTab(project: Project, parent: Disposable) : StatusTab(project, pa
         if (p.unbound == true) b.append("Filed by an older runner: changes to the scenario or the recording since cannot be detected.\n")
         b.append("proof replay: ").append(
             when (p.verified) {
-                true -> "verified, replays at zero AI"
+                true -> if (p.failedRows.isNullOrEmpty()) "verified, replays at zero AI" else "passed, then FAILED on ${p.failedRows.joinToString(", ")}"
                 false -> "FAILED: ${p.proofError ?: "see the proposal file"}"
                 null -> "not run"
             },
