@@ -126,6 +126,8 @@ class CiScenario(
     val displayName: String? = null,
     val status: String = "",
     val verified: Boolean? = null,
+    /** The Examples rows an Outline's proposal failed on, its proof having passed where it was recorded. */
+    val failedRows: List<String>? = null,
     val failingStep: String? = null,
     val error: String? = null,
     val narrative: String? = null,
@@ -279,7 +281,7 @@ internal fun viewRows(view: RunView?, problem: String?, version: String? = null,
             val firstError = s.error?.lineSequence()?.firstOrNull { it.isNotBlank() }?.trim()
             // Yellow is healed, a first recording or a proposal not yet verified: all pending review.
             val found = listOfNotNull(s.failingStep, firstError).ifEmpty { listOf(if (status == "yellow") "pending review" else "failed") }
-            val proof = when (s.verified) { true -> "verified"; false -> "unverified"; null -> null }
+            val proof = when (s.verified) { true -> if (s.failedRows.isNullOrEmpty()) "verified" else "FAILS A ROW"; false -> "unverified"; null -> null }
             val detail = (found + listOfNotNull(proof)).joinToString(" · ")
             rows += row(
                 (s.displayName ?: s.scenario) + (if (view.browsers != null && s.browser != null) " · ${s.browser}" else ""),
