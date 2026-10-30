@@ -52,7 +52,7 @@
       }
     },
     "block-keyword": {
-      "match": "^\\s*(Feature|Background|Scenario Outline|Scenario Template|Scenario|Examples|Scenarios|Rule)(:)(.*)$",
+      "match": "^\\s*(Feature|Background|Fixture|Scenario Outline|Scenario Template|Scenario|Examples|Scenarios|Rule)(:)(.*)$",
       "captures": {
         "1": {
           "name": "keyword.control.gherkin.saffron"
