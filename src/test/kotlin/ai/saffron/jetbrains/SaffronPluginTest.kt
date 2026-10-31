@@ -137,10 +137,9 @@ class SaffronPluginTest : BasePlatformTestCase() {
         assertEquals(insensitive, projectFile(base, "/WORK/Shop/features/a.saffron") != null)
     }
 
-    // Was "a symlink inside the project to a file outside it is refused": the runner
-    // follows linked folders in the test folder wherever they lead and checks a path
-    // as written, so the editor opens what the runner runs.
-    fun `test a report path through a link inside the project opens by its path, as the runner reads it`() {
+    // The runner follows links only inside the test folder: a link elsewhere in the
+    // project that leads out of it is outside.
+    fun `test a report path through a link outside the test folder that leads out of the project is refused`() {
         val outside = Files.createTempDirectory("saffron-outside")
         val root = Files.createTempDirectory("saffron-linked")
         try {
@@ -149,8 +148,10 @@ class SaffronPluginTest : BasePlatformTestCase() {
             Files.writeString(root.resolve("features/a.saffron"), "Feature: A\n")
             Files.createSymbolicLink(root.resolve("linked.txt"), outside.resolve("secret.txt"))
             Files.createSymbolicLink(root.resolve("linkdir"), outside)
-            assertEquals(root.resolve("linked.txt"), projectFile(root, "linked.txt"))
-            assertEquals(root.resolve("linkdir/secret.txt"), projectFile(root, "linkdir/secret.txt"))
+            assertNull(projectFile(root, "linked.txt"))
+            assertNull(projectFile(root, "linkdir/secret.txt"))
+            assertNull(projectFile(root, "linkdir/new.txt"))
+            assertEquals(root.resolve("notes/new.txt"), projectFile(root, "notes/new.txt"))
             // Out of the project as written stays refused, whatever the links.
             assertNull(projectFile(root, "linkdir/../../x.saffron"))
             assertNull(projectFile(root, outside.resolve("secret.txt").toString()))
@@ -257,6 +258,42 @@ class SaffronPluginTest : BasePlatformTestCase() {
         } finally {
             root.toFile().deleteRecursively()
         }
+    }
+
+    fun `test the scan fails on a folder it cannot read, as the runner does, and skips a broken link`() {
+        val root = Files.createTempDirectory("saffron-locked").toRealPath()
+        val locked = root.resolve("features/locked")
+        try {
+            Files.createDirectories(locked)
+            Files.writeString(root.resolve("features/a.saffron"), "Feature: A\n")
+            Files.createSymbolicLink(root.resolve("features/gone"), root.resolve("nowhere"))
+            assertEquals(listOf("features/a.saffron"), SaffronProjectScan.scan(root.toString()).files.map { it.relativePath })
+            assertTrue(locked.toFile().setReadable(false))
+            val failed = runCatching { SaffronProjectScan.scan(root.toString()) }.exceptionOrNull()
+            assertTrue("$failed", failed is java.nio.file.AccessDeniedException)
+        } finally {
+            locked.toFile().setReadable(true)
+            root.toFile().deleteRecursively()
+        }
+    }
+
+    fun `test a Windows junction is a link to the walk, as Node reads it, not a folder of its own`() {
+        fun attrs(directory: Boolean, other: Boolean, symlink: Boolean = false) = object : java.nio.file.attribute.BasicFileAttributes {
+            override fun lastModifiedTime() = java.nio.file.attribute.FileTime.fromMillis(0)
+            override fun lastAccessTime() = lastModifiedTime()
+            override fun creationTime() = lastModifiedTime()
+            override fun isRegularFile() = false
+            override fun isDirectory() = directory
+            override fun isSymbolicLink() = symlink
+            override fun isOther() = other
+            override fun size() = 0L
+            override fun fileKey(): Any? = null
+        }
+        // What Java reports for a junction: a directory that is also a reparse point.
+        assertTrue(SaffronProjectScan.isLink(attrs(directory = true, other = true)))
+        assertTrue(SaffronProjectScan.isLink(attrs(directory = false, other = false, symlink = true)))
+        assertFalse(SaffronProjectScan.isLink(attrs(directory = true, other = false)))
+        assertFalse(SaffronProjectScan.isLink(attrs(directory = false, other = true)))
     }
 
     fun `test a Last Run screenshot opens only while it is the picture that run took`() {

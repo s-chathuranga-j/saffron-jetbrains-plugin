@@ -124,34 +124,47 @@ object SaffronProjectScan {
      * Each folder is walked once by its real path, so a link loop or a Windows junction
      * leading back up ends, and real folders before any link, so a folder reachable both
      * ways keeps its own path. A link to a file counts when it leads to one. With [first],
-     * stops at the first file found.
+     * stops at the first file found. As the runner, a broken or looping link is skipped,
+     * and any other folder it cannot read throws: hiding it would drop its scenarios.
      */
     internal fun runnerFiles(dir: Path, first: Boolean = false): List<Path> {
+        if (!Files.exists(dir)) return emptyList()
         val files = mutableListOf<Path>()
         val seen = HashSet<Path>()
         val links = mutableListOf<Path>()
-        fun walk(at: Path) {
-            val real = runCatching { at.toRealPath() }.getOrNull() ?: return
-            if (!seen.add(real)) return
-            val entries = runCatching { Files.list(at).use { it.toList() } }.getOrNull() ?: return
+        fun walk(at: Path, linked: Boolean) {
+            val (real, entries) = try {
+                at.toRealPath().let { real -> real to (if (real in seen) return else Files.list(at).use { it.toList() }) }
+            } catch (e: java.nio.file.FileSystemException) {
+                // ENOENT and ELOOP, the runner's skippable errors.
+                if (linked && (e is java.nio.file.NoSuchFileException || e.reason?.contains("symbolic links") == true)) return
+                throw e
+            }
+            seen.add(real)
             for (entry in entries) {
                 if (first && files.isNotEmpty()) return
                 val attrs = runCatching { Files.readAttributes(entry, BasicFileAttributes::class.java, LinkOption.NOFOLLOW_LINKS) }.getOrNull() ?: continue
                 val feature = entry.extension in FEATURE_EXTENSIONS
                 when {
-                    attrs.isSymbolicLink && Files.isDirectory(entry) -> if (entry.name !in RUNNER_SKIP_DIRS) links.add(entry)
-                    attrs.isSymbolicLink -> if (feature && Files.isRegularFile(entry)) files.add(entry)
-                    attrs.isDirectory -> if (entry.name !in RUNNER_SKIP_DIRS) walk(entry)
+                    isLink(attrs) && Files.isDirectory(entry) -> if (entry.name !in RUNNER_SKIP_DIRS) links.add(entry)
+                    isLink(attrs) -> if (feature && Files.isRegularFile(entry)) files.add(entry)
+                    attrs.isDirectory -> if (entry.name !in RUNNER_SKIP_DIRS) walk(entry, false)
                     attrs.isRegularFile -> if (feature) files.add(entry)
                 }
             }
         }
-        walk(dir)
+        walk(dir, false)
         // Then the linked folders, each once by its real path (links found in them join the queue).
         var i = 0
-        while (i < links.size && !(first && files.isNotEmpty())) walk(links[i++])
+        while (i < links.size && !(first && files.isNotEmpty())) walk(links[i++], true)
         return files
     }
+
+    /**
+     * A link as the runner (Node) sees one: a symbolic link, or on Windows a junction,
+     * which Java reports as a directory that is also "other" (a reparse point).
+     */
+    internal fun isLink(attrs: BasicFileAttributes): Boolean = attrs.isSymbolicLink || (attrs.isDirectory && attrs.isOther)
 
     private fun describe(base: Path, file: Path): SaffronFile {
         val lines = runCatching { Files.readAllLines(file) }.getOrDefault(emptyList())

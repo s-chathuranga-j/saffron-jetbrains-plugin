@@ -585,6 +585,27 @@ class SaffronRunConfigurationTest : BasePlatformTestCase() {
         }
     }
 
+    fun `test right-click Run counts a linked folder without reading through it`() {
+        val base = Path.of(project.basePath!!)
+        val shared = Files.createTempDirectory("saffron-locked-features")
+        try {
+            Files.writeString(base.resolve("saffron.config.json"), "{}")
+            Files.createDirectories(base.resolve("features/only-link"))
+            Files.writeString(shared.resolve("checkout.saffron"), "Feature: C\n\nScenario: Checkout\n  Given y\n")
+            Files.createSymbolicLink(base.resolve("features/only-link/shared"), shared)
+            SaffronStatusService.getInstance(project).discoverRoots()
+            // Unreadable behind the link: Run is offered all the same, and the runner says why it fails.
+            assertTrue(shared.toFile().setReadable(false))
+            assertEquals("features/only-link", offered(base.resolve("features/only-link")).single().paths)
+        } finally {
+            shared.toFile().setReadable(true)
+            Files.deleteIfExists(base.resolve("saffron.config.json"))
+            base.resolve("features").toFile().deleteRecursively()
+            shared.toFile().deleteRecursively()
+            SaffronStatusService.getInstance(project).discoverRoots()
+        }
+    }
+
     fun `test a configuration saved with a blank working directory is found again, not duplicated`() {
         val base = Path.of(project.basePath!!)
         val runManager = RunManager.getInstance(project)

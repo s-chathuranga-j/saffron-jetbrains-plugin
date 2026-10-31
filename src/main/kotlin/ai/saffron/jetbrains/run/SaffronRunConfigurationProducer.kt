@@ -12,6 +12,7 @@ import com.intellij.openapi.fileEditor.FileDocumentManager
 import com.intellij.openapi.util.Ref
 import com.intellij.openapi.util.io.FileUtil
 import com.intellij.openapi.vfs.LocalFileSystem
+import com.intellij.openapi.vfs.VFileProperty
 import com.intellij.openapi.vfs.VirtualFile
 import com.intellij.psi.PsiElement
 import java.nio.file.Files
@@ -114,9 +115,16 @@ class SaffronRunConfigurationProducer : LazyRunConfigurationProducer<SaffronRunC
     }
 
     companion object {
-        /** The runner's walk (SaffronProjectScan.runnerFiles): its SKIPPED_DIRS, linked folders followed. */
-        fun containsSaffronFiles(dir: VirtualFile?): Boolean =
-            dir != null && dir.isDirectory && dir.isInLocalFileSystem &&
-                SaffronProjectScan.runnerFiles(Path.of(dir.path), first = true).isNotEmpty()
+        /**
+         * Whether the runner's walk finds a file in [dir], from the VFS (no disk read on a
+         * context evaluation): its SKIPPED_DIRS skipped, and a linked folder counted without
+         * reading through it, as the runner follows it wherever it leads.
+         */
+        fun containsSaffronFiles(dir: VirtualFile?, seen: MutableSet<String> = HashSet()): Boolean =
+            dir != null && dir.isDirectory && dir.isInLocalFileSystem && seen.add(dir.canonicalPath ?: dir.path) &&
+                dir.children.any { child ->
+                    if (child.isDirectory) child.name !in SaffronProjectScan.RUNNER_SKIP_DIRS && (child.`is`(VFileProperty.SYMLINK) || containsSaffronFiles(child, seen))
+                    else child.extension in FEATURE_EXTENSIONS
+                }
     }
 }

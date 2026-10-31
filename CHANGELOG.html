@@ -1,3 +1,10 @@
+<h3>Unreleased</h3>
+<ul>
+  <li>The Files tab says it could not list the project's files when a folder in the test folder cannot be read, as the runner fails on it, instead of hiding that folder's files. A broken link is still skipped.</li>
+  <li>Right-click Run decides from the IDE's view of the files, without reading the disk or through links each time the menu opens.</li>
+  <li>On Windows, a junction in the test folder is walked as a link, as the runner walks it: a folder reachable both ways keeps its own path.</li>
+  <li>A report path through a link outside the test folder opens only when it really leads into the project: the runner follows links inside the test folder only.</li>
+</ul>
 <h3>0.7.7</h3>
 <ul>
   <li>A <code>.saffron</code> file's <code>Fixture:</code> line is coloured as a block keyword, as <code>Scenario:</code> is.</li>

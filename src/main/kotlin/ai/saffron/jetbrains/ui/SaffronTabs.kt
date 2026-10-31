@@ -37,18 +37,21 @@ import javax.swing.JSplitPane
  * [rel] inside a trusted root of the project at [root], or null when it leads out of
  * them all (`../` or an absolute path): paths from a report, which an imported CI run
  * wrote, are never trusted. The trusted roots are the project, its test folder (which
- * may sit outside it, as `"features": "../e2e"`) and its .saffron folder. The path is
- * checked as written, the way the runner checks it: the runner follows linked folders
- * inside the test folder wherever they lead, so a file it runs through one opens here.
+ * may sit outside it, as `"features": "../e2e"`) and its .saffron folder. The runner
+ * follows linked folders inside the test folder wherever they lead, so a path there
+ * counts as written; anywhere else a link is not followed, so a path counts where it
+ * really leads.
  */
 internal fun projectFile(root: Path, rel: String): Path? {
     val base = root.toAbsolutePath().normalize()
     val full = runCatching { base.resolve(rel).normalize() }.getOrNull()?.takeIf { rel.isNotEmpty() } ?: return null
-    val trusted = listOf(base, SaffronProjectScan.featuresDir(base), base.resolve(".saffron"))
-    val real = trusted.map { r -> runCatching { r.toRealPath() }.getOrDefault(r) }
+    val features = SaffronProjectScan.featuresDir(base)
+    val trusted = listOf(base, features, base.resolve(".saffron"))
+    // The real path, through its nearest existing folder for a file not written yet.
+    fun real(p: Path): Path = runCatching { p.toRealPath() }.getOrNull() ?: p.parent?.let { real(it).resolve(p.fileName.toString()) } ?: p
     // As the file system compares names: case-insensitively on macOS and Windows.
     fun inside(p: Path, roots: List<Path>) = roots.any { com.intellij.openapi.util.io.FileUtil.isAncestor(it.toString(), p.toString(), true) }
-    return full.takeIf { inside(it, trusted + real) }
+    return full.takeIf { inside(it, listOf(features)) || inside(real(it), trusted + trusted.map(::real)) }
 }
 
 /** Shared scaffolding for the status-driven tabs. */
