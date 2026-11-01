@@ -44,6 +44,40 @@ class StatusFeature(
 
 class StatusTag(val tag: String = "", val scenarios: Int = 0)
 
+/**
+ * One feature edit as the runner's `status --json` lists it
+ * (src/cache/diff.ts describeFeatureEdits): the step now and proposed, the
+ * file and line accept rewrites (a StepSet's definition for its steps), and
+ * why accept would skip it.
+ */
+class StatusFeatureEdit(
+    val index: Int = 0,
+    val from: String = "",
+    val to: String = "",
+    val fromStepSet: String? = null,
+    val file: String? = null,
+    val line: Int? = null,
+    val skipped: String? = null,
+)
+
+/** A proposal's feature edits as the details pane shows them; empty when it has none. */
+internal fun featureEditText(edits: List<StatusFeatureEdit>?): String {
+    if (edits.isNullOrEmpty()) return ""
+    val b = StringBuilder("\nFeature file edits, applied only by saffron accept --with-feature-edit:\n")
+    for (e in edits) {
+        b.append("  ")
+        if (e.file != null) {
+            b.append(e.file).append(':').append(e.line ?: 0)
+            e.fromStepSet?.let { b.append(" (step set \"").append(it).append("\", every scenario that uses it)") }
+            b.append(": ")
+        }
+        b.append('"').append(e.from).append("\" becomes \"").append(e.to).append('"')
+        e.skipped?.let { b.append(" (accept skips it: ").append(it).append(')') }
+        b.append('\n')
+    }
+    return b.toString()
+}
+
 class StatusProposal(
     val file: String = "",
     val feature: String = "",
@@ -60,6 +94,8 @@ class StatusProposal(
     val adaptations: List<String> = emptyList(),
     val narrative: String = "",
     val suggestedFeatureEdit: String? = null,
+    /** The step rewrites `accept --with-feature-edit` would apply, with where each lands; absent from older runners. */
+    val featureEdits: List<StatusFeatureEdit>? = null,
     val recordedFor: String? = null,
     val aiCalls: Int = 0,
     val costUsd: Double? = null,

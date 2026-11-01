@@ -327,6 +327,7 @@ class ProposalsTab(project: Project, parent: Disposable) : StatusTab(project, pa
             for (a in p.adaptations) b.append("  ⚠ ").append(a).append('\n')
         }
         p.suggestedFeatureEdit?.let { b.append("\nSuggested feature edit:\n").append(it).append('\n') }
+        b.append(featureEditText(p.featureEdits))
         return b.toString()
     }
 }
