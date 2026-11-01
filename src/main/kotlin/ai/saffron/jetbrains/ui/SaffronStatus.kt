@@ -56,23 +56,24 @@ class StatusFeatureEdit(
     val to: String = "",
     val fromStepSet: String? = null,
     val file: String? = null,
-    val line: Int? = null,
+    /** A number, read leniently: an odd value must not fail the whole status parse. */
+    val line: Double? = null,
     val skipped: String? = null,
 )
 
 /** A proposal's feature edits as the details pane shows them; empty when it has none. */
 internal fun featureEditText(edits: List<StatusFeatureEdit>?): String {
     if (edits.isNullOrEmpty()) return ""
-    val b = StringBuilder("\nFeature file edits, applied only by saffron accept --with-feature-edit:\n")
+    val b = StringBuilder("\nFeature file edits [protected], applied only by saffron accept --with-feature-edit:\n")
     for (e in edits) {
+        // The file only while the feature still parses; the step set's reach whether or not.
+        val file = e.file?.let { f -> f + (e.line?.takeIf { it >= 1 && it % 1.0 == 0.0 }?.let { ":${it.toInt()}" } ?: "") }
+        val shared = e.fromStepSet?.let { "(step set \"$it\", every scenario that uses it)" }
+        val where = listOfNotNull(file, shared).joinToString(" ")
         b.append("  ")
-        if (e.file != null) {
-            b.append(e.file).append(':').append(e.line ?: 0)
-            e.fromStepSet?.let { b.append(" (step set \"").append(it).append("\", every scenario that uses it)") }
-            b.append(": ")
-        }
+        if (where.isNotEmpty()) b.append(where).append(": ")
         b.append('"').append(e.from).append("\" becomes \"").append(e.to).append('"')
-        e.skipped?.let { b.append(" (accept skips it: ").append(it).append(')') }
+        e.skipped?.let { b.append(" (accept skips this edit: ").append(it).append(')') }
         b.append('\n')
     }
     return b.toString()

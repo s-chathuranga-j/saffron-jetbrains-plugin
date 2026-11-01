@@ -1287,9 +1287,16 @@ class SaffronPluginTest : BasePlatformTestCase() {
             """{"index":0,"from":"I open the shop","to":"I open the store","fromStepSet":"Open the shop","file":"features/sets.saffron","line":4,"adaptation":"protected"},""" +
             """{"index":1,"from":"I am signed in","to":"I am logged in","file":"features/shop.saffron","line":3,"adaptation":"protected","skipped":"it is a Background step shared across scenarios; edit it by hand"}]}"""
         val text = ai.saffron.jetbrains.ui.featureEditText(Gson().fromJson(json, StatusProposal::class.java).featureEdits)
-        assertTrue(text, text.contains("Feature file edits, applied only by saffron accept --with-feature-edit:"))
+        assertTrue(text, text.contains("Feature file edits [protected], applied only by saffron accept --with-feature-edit:"))
         assertTrue(text, text.contains("""features/sets.saffron:4 (step set "Open the shop", every scenario that uses it): "I open the shop" becomes "I open the store""""))
-        assertTrue(text, text.contains("""features/shop.saffron:3: "I am signed in" becomes "I am logged in" (accept skips it: it is a Background step"""))
+        assertTrue(text, text.contains("""features/shop.saffron:3: "I am signed in" becomes "I am logged in" (accept skips this edit: it is a Background step"""))
+        // No file (the feature no longer parses): the step set's reach still shows. An odd line is left out, never fails the parse.
+        val unplaced = ai.saffron.jetbrains.ui.featureEditText(Gson().fromJson(
+            """{"featureEdits":[{"index":0,"from":"a","to":"b","fromStepSet":"Open the shop"},{"index":1,"from":"c","to":"d","file":"f.saffron","line":4.5}]}""",
+            StatusProposal::class.java,
+        ).featureEdits)
+        assertTrue(unplaced, unplaced.contains("""(step set "Open the shop", every scenario that uses it): "a" becomes "b""""))
+        assertTrue(unplaced, unplaced.contains("""f.saffron: "c" becomes "d""""))
         // An older runner lists none: nothing is added.
         assertEquals("", ai.saffron.jetbrains.ui.featureEditText(Gson().fromJson("""{"file":"p.json"}""", StatusProposal::class.java).featureEdits))
     }
