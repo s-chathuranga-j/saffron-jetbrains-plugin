@@ -234,7 +234,7 @@ class ProposalsTab(project: Project, parent: Disposable) : StatusTab(project, pa
         diffLoading?.destroyProcess()
         diffLoading = null
         diffs[key]?.let { cached ->
-            details.text = describe(proposal) + cached
+            details.text = describe(proposal, cached) + cached
             details.caretPosition = 0
             return
         }
@@ -253,7 +253,7 @@ class ProposalsTab(project: Project, parent: Disposable) : StatusTab(project, pa
             val text = try {
                 val output = processes.tracked { it.runProcess(60_000, true) }(handler)
                 if (output.exitCode == 0 && output.stdout.isNotBlank()) {
-                    "\n\nWHAT THIS PROPOSAL CHANGES\n\n" + output.stdout.trim()
+                    DIFF_HEADING + output.stdout.trim()
                 } else {
                     "\n\n(could not load the diff: " + commandProblem(output, "diff", 60) + ")"
                 }
@@ -270,7 +270,7 @@ class ProposalsTab(project: Project, parent: Disposable) : StatusTab(project, pa
                 diffs[key] = text
                 val selected = if (list.selectedIndex >= 0) list.getItemAt(list.selectedIndex) else null
                 if (selected != null && diffKey(selected) == key) {
-                    details.text = describe(selected) + text
+                    details.text = describe(selected, text) + text
                     details.caretPosition = 0
                 }
             }, project.disposed)
@@ -301,7 +301,8 @@ class ProposalsTab(project: Project, parent: Disposable) : StatusTab(project, pa
         }
     }
 
-    private fun describe(p: StatusProposal?): String {
+    /** [diff] is what follows in the pane: a loaded diff lists the feature edits itself, so they are not listed twice. */
+    private fun describe(p: StatusProposal?, diff: String = ""): String {
         p ?: return ""
         val b = StringBuilder()
         b.append(p.feature).append(" › ").append(p.scenario).append('\n')
@@ -327,7 +328,7 @@ class ProposalsTab(project: Project, parent: Disposable) : StatusTab(project, pa
             for (a in p.adaptations) b.append("  ⚠ ").append(a).append('\n')
         }
         p.suggestedFeatureEdit?.let { b.append("\nSuggested feature edit:\n").append(it).append('\n') }
-        b.append(featureEditText(p.featureEdits))
+        b.append(editsBeside(p.featureEdits, diff))
         return b.toString()
     }
 }
@@ -389,3 +390,9 @@ class TagsTab(project: Project, parent: Disposable) : StatusTab(project, parent)
 
 /** A tag --filter reads as one token (the runner's tokenizer): `@issue(42)` is fine, `@a,b` or `@a|b` is not. */
 internal fun filterableTag(tag: String): Boolean = Regex("[^\\s(),|]+(?:\\([^\\s(),|]*\\))*").matches(tag)
+
+/** What precedes a loaded `saffron diff` in the Proposals details pane. */
+internal const val DIFF_HEADING = "\n\nWHAT THIS PROPOSAL CHANGES\n\n"
+
+/** The feature edits for the details pane: none when a loaded diff beside them lists them already. */
+internal fun editsBeside(edits: List<StatusFeatureEdit>?, diff: String): String = if (diff.startsWith(DIFF_HEADING)) "" else featureEditText(edits)

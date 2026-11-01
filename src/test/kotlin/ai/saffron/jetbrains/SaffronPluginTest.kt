@@ -1297,6 +1297,10 @@ class SaffronPluginTest : BasePlatformTestCase() {
         ).featureEdits)
         assertTrue(unplaced, unplaced.contains("""(step set "Open the shop", every scenario that uses it): "a" becomes "b""""))
         assertTrue(unplaced, unplaced.contains("""f.saffron: "c" becomes "d""""))
+        // A loaded diff lists them itself: the pane does not list them twice (found in review).
+        val edits = Gson().fromJson(json, StatusProposal::class.java).featureEdits
+        assertEquals("", ai.saffron.jetbrains.ui.editsBeside(edits, ai.saffron.jetbrains.ui.DIFF_HEADING + "Feature file edits [protected], ..."))
+        assertEquals(text, ai.saffron.jetbrains.ui.editsBeside(edits, "\n\n(could not load the diff: boom)"))
         // An older runner lists none: nothing is added.
         assertEquals("", ai.saffron.jetbrains.ui.featureEditText(Gson().fromJson("""{"file":"p.json"}""", StatusProposal::class.java).featureEdits))
     }
