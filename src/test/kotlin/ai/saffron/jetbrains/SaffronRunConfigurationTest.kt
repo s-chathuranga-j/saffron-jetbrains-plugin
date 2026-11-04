@@ -55,18 +55,18 @@ class SaffronRunConfigurationTest : BasePlatformTestCase() {
             assertEquals("Saffron: Run 'Successful login'", first.name)
             assertTrue(first.isTemporary)
             assertEquals(root, c.workingDirectory)
-            assertEquals(listOf("run", "features/login.saffron:Successful login"), SaffronCommand.arguments(c))
+            assertEquals(listOf("run", "--", "features/login.saffron:Successful login"), SaffronCommand.arguments(c))
             assertSame(first, SaffronScenarioRun.configuration(project, root, "features/login.saffron:Successful login", "Successful login", "run"))
             assertSame(first, runManager.selectedConfiguration)
             // The saved one is the user's: still there, still running what it ran.
             assertSame(saved, runManager.findConfigurationByTypeAndName(type, "Run 'Successful login'"))
-            assertEquals(listOf("run", "features/login.saffron", "--env", "staging"), SaffronCommand.arguments(saved.configuration as SaffronRunConfiguration))
+            assertEquals(listOf("run", "--env", "staging", "--", "features/login.saffron"), SaffronCommand.arguments(saved.configuration as SaffronRunConfiguration))
             // Replay only and Headed are configurations of their own.
             val replay = SaffronScenarioRun.configuration(project, root, "features/login.saffron:Successful login", "Successful login", "replay")
             val headed = SaffronScenarioRun.configuration(project, root, "features/login.saffron:Successful login", "Successful login", "headed")
             assertEquals("Run 'Successful login' (replay only)", replay.name)
-            assertEquals(listOf("run", "features/login.saffron:Successful login", "--no-agent"), SaffronCommand.arguments(replay.configuration as SaffronRunConfiguration))
-            assertEquals(listOf("run", "features/login.saffron:Successful login", "--headed"), SaffronCommand.arguments(headed.configuration as SaffronRunConfiguration))
+            assertEquals(listOf("run", "--no-agent", "--", "features/login.saffron:Successful login"), SaffronCommand.arguments(replay.configuration as SaffronRunConfiguration))
+            assertEquals(listOf("run", "--headed", "--", "features/login.saffron:Successful login"), SaffronCommand.arguments(headed.configuration as SaffronRunConfiguration))
         } finally {
             template.tags = ""; template.rerecord = false; template.extraArgs = ""
             runManager.getConfigurationSettingsList(type).forEach(runManager::removeConfiguration)
@@ -102,6 +102,8 @@ class SaffronRunConfigurationTest : BasePlatformTestCase() {
         assertEquals(null, SaffronScenarioRun.scenarioAt(german, 5))
         assertEquals(null, SaffronScenarioRun.scenarioAt(german, 7))
         assertEquals("Erstes" to 4, SaffronScenarioRun.scenarioAt(german, 4))
+        // A Fixture's steps are no scenario's (found in review): the runner refuses a line in one.
+        assertEquals(null, SaffronScenarioRun.scenarioAt("Feature: F\n  Scenario: A\n    Given x\n  Fixture: Signed in\n    Given I sign in\n", 4))
     }
 
     fun `test without an install, the version check reads the version package json pins npx to`() {
@@ -143,7 +145,7 @@ class SaffronRunConfigurationTest : BasePlatformTestCase() {
             assertNotSame(a, b)
             assertEquals(listOf("Run 'Happy path'", "Run 'Happy path' in features/b.saffron"), listOf(a.name, b.name))
             // a's still runs a's scenario: its Run tab reruns what it ran.
-            assertEquals(listOf("run", "features/a.saffron:Happy path"), SaffronCommand.arguments(a.configuration as SaffronRunConfiguration))
+            assertEquals(listOf("run", "--", "features/a.saffron:Happy path"), SaffronCommand.arguments(a.configuration as SaffronRunConfiguration))
             assertSame(b, SaffronScenarioRun.configuration(project, root, "features/b.saffron:Happy path", "Happy path", "run"))
         } finally {
             runManager.getConfigurationSettingsList(SaffronConfigurationType.INSTANCE).forEach(runManager::removeConfiguration)
@@ -155,7 +157,7 @@ class SaffronRunConfigurationTest : BasePlatformTestCase() {
             val a = SaffronScenarioRun.configuration(project, root, "features/a.saffron:Login", "Login", "run")
             val b = SaffronScenarioRun.configuration(project, root, "features/b.saffron:Login", "Login", "run")
             assertEquals(listOf("Saffron: Run 'Login'", "Run 'Login' in features/b.saffron"), listOf(a.name, b.name))
-            assertEquals(listOf("run", "features/a.saffron:Login"), SaffronCommand.arguments(a.configuration as SaffronRunConfiguration))
+            assertEquals(listOf("run", "--", "features/a.saffron:Login"), SaffronCommand.arguments(a.configuration as SaffronRunConfiguration))
         } finally {
             runManager.getConfigurationSettingsList(SaffronConfigurationType.INSTANCE).forEach(runManager::removeConfiguration)
         }
@@ -351,15 +353,18 @@ class SaffronRunConfigurationTest : BasePlatformTestCase() {
         // What the plugin writes for a ticked or right-clicked file.
         c.paths = SaffronCommand.joinPaths(listOf("features/order checkout.saffron", "features/login.saffron"))
         assertEquals(
-            listOf("run", "features/order checkout.saffron", "features/login.saffron"),
+            listOf("run", "--", "features/order checkout.saffron", "features/login.saffron"),
             SaffronCommand.arguments(c),
         )
         // What a person types: quotes keep the path whole, a comma inside a name survives.
         c.paths = "\"features/order checkout.saffron\" features/a,b.saffron"
         assertEquals(
-            listOf("run", "features/order checkout.saffron", "features/a,b.saffron"),
+            listOf("run", "--", "features/order checkout.saffron", "features/a,b.saffron"),
             SaffronCommand.arguments(c),
         )
+        // A file whose name starts with a dash is a file, never an option (found in review).
+        c.paths = "-wip.saffron"
+        assertEquals(listOf("run", "--", "-wip.saffron"), SaffronCommand.arguments(c))
     }
 
     fun `test run arguments follow the CLI flags`() {
@@ -372,10 +377,10 @@ class SaffronRunConfigurationTest : BasePlatformTestCase() {
         c.rerecord = true
         c.extraArgs = "--strict --workers 4"
         assertEquals(
-            listOf("run", "features/login.saffron", "features/checkout", "--filter", "@smoke", "--no-agent", "--headed", "--rerecord", "--strict", "--workers", "4"),
+            listOf("run", "--filter", "@smoke", "--no-agent", "--headed", "--rerecord", "--strict", "--workers", "4", "--", "features/login.saffron", "features/checkout"),
             SaffronCommand.arguments(c),
         )
-        assertEquals("saffron run features/login.saffron features/checkout --filter @smoke --no-agent --headed --rerecord --strict --workers 4", c.suggestedName())
+        assertEquals("saffron run --filter @smoke --no-agent --headed --rerecord --strict --workers 4 -- features/login.saffron features/checkout", c.suggestedName())
     }
 
     fun `test report and accept ignore the run-only fields`() {
@@ -899,7 +904,7 @@ class SaffronRunConfigurationTest : BasePlatformTestCase() {
             assertEquals("", c.tags)
             assertEquals("", c.extraArgs)
             assertEquals(SaffronStatusService.getInstance(project).root.toString(), c.workingDirectory)
-            assertEquals(listOf("run", "features/a.saffron"), SaffronCommand.arguments(c))
+            assertEquals(listOf("run", "--", "features/a.saffron"), SaffronCommand.arguments(c))
         } finally {
             runManager.findConfigurationByTypeAndName(SaffronConfigurationType.INSTANCE, name)?.let(runManager::removeConfiguration)
         }

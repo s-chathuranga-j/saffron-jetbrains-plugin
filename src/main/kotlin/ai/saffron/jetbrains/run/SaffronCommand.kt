@@ -141,11 +141,14 @@ object SaffronCommand {
             }
             else -> {
                 args += "run"
-                args += splitPaths(c.paths)
                 if (c.tags.isNotBlank()) args += listOf("--filter", c.tags.trim())
                 if (c.replayOnly) args += "--no-agent"
                 if (c.headed) args += "--headed"
                 if (c.rerecord) args += "--rerecord"
+                if (c.extraArgs.isNotBlank()) args += ParametersListUtil.parse(c.extraArgs.trim())
+                // The targets last, after `--`, as the VS Code extension runs them: a file named -wip.saffron is a file, never an option.
+                splitPaths(c.paths).takeIf { it.isNotEmpty() }?.let { args += listOf("--") + it }
+                return args
             }
         }
         if (c.extraArgs.isNotBlank()) args += ParametersListUtil.parse(c.extraArgs.trim())

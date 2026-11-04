@@ -109,7 +109,8 @@ object SaffronScenarioRun {
         val found = mutableListOf<Pair<Int, String?>>()
         val keywords = SaffronProjectScan.scenarioKeywords(lines)
         // The file's own language too (Funktionalität, Grundlage, Regel): an English-only list ran the Rule before's last scenario.
-        val others = SaffronProjectScan.blockKeywords(lines) + "StepSet"
+        // A .saffron StepSet or Fixture is no scenario either: the runner refuses a line in one (src/parser/filter.ts).
+        val others = SaffronProjectScan.blockKeywords(lines) + listOf("StepSet", "Fixture")
         var fence: String? = null
         for (i in 0..last) {
             val trimmed = lines.getOrElse(i) { "" }.trim()

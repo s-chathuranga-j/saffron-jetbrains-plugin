@@ -2,6 +2,8 @@
 <ul>
   <li>Accept All asks before it runs <code>saffron accept --all</code>, in the Proposals tab and the side panel, as the VS Code extension does: it accepts what is pending when it runs, including proposals you have not reviewed.</li>
   <li>A proposal that fails a row is marked held from Accept All, as <code>saffron accept --all</code> skips it, with or without a "row not proved:" note.</li>
+  <li>Right-click Run inside a <code>Fixture:</code> block no longer runs the scenario above it: a line in a fixture is in no scenario, as the runner says.</li>
+  <li>A run passes its files after <code>--</code>, as the VS Code extension does, so a file whose name starts with a dash is run as a file, never read as an option.</li>
   <li>Right-click Run in a file written in another Gherkin language (<code># language: de</code>) no longer runs the previous Rule's last scenario from a <code>Regel:</code> header or a <code>Grundlage:</code>: the file's own Feature, Background and Rule keywords end a scenario, as in English.</li>
 </ul>
 <h3>0.7.9</h3>
