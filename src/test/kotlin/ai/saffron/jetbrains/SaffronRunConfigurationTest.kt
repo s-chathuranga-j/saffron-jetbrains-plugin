@@ -900,6 +900,20 @@ class SaffronRunConfigurationTest : BasePlatformTestCase() {
         }
     }
 
+    fun `test Accept All never becomes the configuration the Run button repeats`() {
+        val runManager = RunManager.getInstance(project)
+        val type = SaffronConfigurationType.INSTANCE
+        try {
+            val run = SaffronRunner.prepare(project, "Saffron: run all") {}
+            assertSame(run, runManager.selectedConfiguration)
+            val accept = SaffronRunner.prepare(project, "Saffron: accept all") { it.command = "accept" }
+            assertNotSame(accept, runManager.selectedConfiguration)
+            assertSame(run, runManager.selectedConfiguration)
+        } finally {
+            listOf("Saffron: run all", "Saffron: accept all").forEach { n -> runManager.findConfigurationByTypeAndName(type, n)?.let(runManager::removeConfiguration) }
+        }
+    }
+
     fun `test a tool window button never resets a saved configuration of the same name`() {
         val name = "Run login.saffron"
         val runManager = RunManager.getInstance(project)
