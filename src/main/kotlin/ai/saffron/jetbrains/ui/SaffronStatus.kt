@@ -121,7 +121,7 @@ class StatusProposal(
 }
 
 /** The runner's HELD_FOR_REVIEW note prefixes (src/cache/held.ts). */
-private val HELD_NOTES = listOf("behavior change:", "insensitive check:", "volatile locator:", "requirement not kept:", "unstable recording:", "row not proved:", "date not following the clock:", "write not finished:", "check changed the page:")
+private val HELD_NOTES = listOf("behavior change:", "check weakened:", "insensitive check:", "volatile locator:", "requirement not kept:", "unstable recording:", "row not proved:", "date not following the clock:", "data not followed:", "write not finished:", "check changed the page:")
 
 /** Where an imported proposal came from: the run ("github:901") and its link, the branch and commit, the shard. */
 class ImportedFrom(
