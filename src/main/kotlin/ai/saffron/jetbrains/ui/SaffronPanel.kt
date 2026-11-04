@@ -197,7 +197,9 @@ class SaffronPanel(private val project: Project, parent: Disposable) : SimpleToo
         if (java.nio.file.Files.exists(html)) BrowserUtil.browse(html.toUri()) else hint.text = "No report yet: run something first."
     }
 
-    private fun acceptAll() = SaffronRunner.execute(project, "Saffron: accept all") { it.command = "accept" }
+    private fun acceptAll() {
+        if (SaffronRunner.confirmAcceptAll(project)) SaffronRunner.execute(project, "Saffron: accept all") { it.command = "accept" }
+    }
 
     private fun open(file: SaffronFile) {
         val vf = LocalFileSystem.getInstance().refreshAndFindFileByNioFile(service.root.resolve(file.relativePath)) ?: return

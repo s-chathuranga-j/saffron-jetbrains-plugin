@@ -1,3 +1,9 @@
+<h3>Unreleased</h3>
+<ul>
+  <li>Accept All asks before it runs <code>saffron accept --all</code>, in the Proposals tab and the side panel, as the VS Code extension does: it accepts what is pending when it runs, including proposals you have not reviewed.</li>
+  <li>A proposal that fails a row is marked held from Accept All, as <code>saffron accept --all</code> skips it, with or without a "row not proved:" note.</li>
+  <li>Right-click Run in a file written in another Gherkin language (<code># language: de</code>) no longer runs the previous Rule's last scenario from a <code>Regel:</code> header or a <code>Grundlage:</code>: the file's own Feature, Background and Rule keywords end a scenario, as in English.</li>
+</ul>
 <h3>0.7.9</h3>
 <ul>
   <li><code>Examples: {data: roles}</code> or <code>{Data:roles}</code> with no table under it is marked as an error where it is written, through saffron-ai 1.3.2's language server, as the runner stops on it.</li>

@@ -76,7 +76,6 @@ object SaffronScenarioRun {
         return runnerAtLeast(version, 0, 9, 8)
     }
 
-    private val OTHER_BLOCK = Regex("^(Feature|Background|Rule|StepSet):")
 
     /**
      * The scenario a 0-based [line] of [text] is in, as its name and 1-based
@@ -109,6 +108,8 @@ object SaffronScenarioRun {
     private fun headings(lines: List<String>, last: Int): List<Pair<Int, String?>> {
         val found = mutableListOf<Pair<Int, String?>>()
         val keywords = SaffronProjectScan.scenarioKeywords(lines)
+        // The file's own language too (Funktionalität, Grundlage, Regel): an English-only list ran the Rule before's last scenario.
+        val others = SaffronProjectScan.blockKeywords(lines) + "StepSet"
         var fence: String? = null
         for (i in 0..last) {
             val trimmed = lines.getOrElse(i) { "" }.trim()
@@ -120,7 +121,7 @@ object SaffronScenarioRun {
             if (fence != null) continue
             val keyword = keywords.firstOrNull { trimmed.startsWith("$it:") }
             if (keyword != null) found += i to trimmed.substring(keyword.length + 1).trim()
-            else if (OTHER_BLOCK.containsMatchIn(trimmed)) found += i to null
+            else if (others.any { trimmed.startsWith("$it:") }) found += i to null
         }
         return found
     }

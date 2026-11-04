@@ -97,6 +97,11 @@ class SaffronRunConfigurationTest : BasePlatformTestCase() {
         assertEquals("Primo" to 3, SaffronScenarioRun.scenarioAt(italian, 3))
         assertEquals(2, SaffronScenarioRun.named(italian, "Secondo"))
         assertEquals("Works" to 2, SaffronScenarioRun.scenarioAt("# language: en\nScenario: Works\n", 1))
+        // A Rule's header and Background in the file's own language are no scenario (found in review).
+        val german = "# language: de\nFunktionalität: F\n  Regel: Eins\n    Szenario: Erstes\n      Angenommen x\n  Regel: Zwei\n    Grundlage:\n      Angenommen y\n"
+        assertEquals(null, SaffronScenarioRun.scenarioAt(german, 5))
+        assertEquals(null, SaffronScenarioRun.scenarioAt(german, 7))
+        assertEquals("Erstes" to 4, SaffronScenarioRun.scenarioAt(german, 4))
     }
 
     fun `test without an install, the version check reads the version package json pins npx to`() {

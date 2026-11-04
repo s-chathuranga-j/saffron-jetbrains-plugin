@@ -6,6 +6,7 @@ import com.intellij.execution.RunManager
 import com.intellij.execution.RunnerAndConfigurationSettings
 import com.intellij.execution.executors.DefaultRunExecutor
 import com.intellij.openapi.project.Project
+import com.intellij.openapi.ui.Messages
 
 /** Runs a Saffron configuration from anywhere in the plugin (tool window buttons). */
 object SaffronRunner {
@@ -24,6 +25,16 @@ object SaffronRunner {
         }
         return label to found
     }
+
+    /** Asked before `saffron accept --all`, as the VS Code extension asks: it accepts what is pending when it runs, unread. */
+    fun confirmAcceptAll(project: Project): Boolean = Messages.showYesNoDialog(
+        project,
+        "Accept every pending proposal that saffron accept --all takes? It accepts what is pending when it runs, including proposals you have not reviewed.",
+        "Accept All Proposals",
+        "Accept All",
+        "Cancel",
+        Messages.getWarningIcon(),
+    ) == Messages.YES
 
     fun execute(project: Project, name: String, configure: (SaffronRunConfiguration) -> Unit) {
         ProgramRunnerUtil.executeConfiguration(prepare(project, name, configure), DefaultRunExecutor.getRunExecutorInstance())

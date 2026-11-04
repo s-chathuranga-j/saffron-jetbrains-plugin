@@ -295,6 +295,7 @@ class ProposalsTab(project: Project, parent: Disposable) : StatusTab(project, pa
 
     /** The deliberate bulk action, never reachable by leaving the list untouched. */
     private fun acceptAll() {
+        if (!SaffronRunner.confirmAcceptAll(project)) return
         SaffronRunner.execute(project, "Saffron: accept all") {
             it.command = "accept"
             it.paths = ""

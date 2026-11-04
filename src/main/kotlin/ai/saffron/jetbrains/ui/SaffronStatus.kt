@@ -114,10 +114,10 @@ class StatusProposal(
 
     /**
      * Whether `saffron accept --all` leaves this proposal to be accepted by file, as the runner
-     * decides: unverified or not checked, imported from CI, or a note its HELD_FOR_REVIEW names.
+     * decides: unverified or not checked, imported from CI, failing a row, or a note its HELD_FOR_REVIEW names.
      */
     val heldFromAcceptAll: Boolean
-        get() = verified != true || importedFrom != null || adaptations.any { a -> HELD_NOTES.any { a.startsWith(it) } }
+        get() = verified != true || importedFrom != null || !failedRows.isNullOrEmpty() || adaptations.any { a -> HELD_NOTES.any { a.startsWith(it) } }
 }
 
 /** The runner's HELD_FOR_REVIEW note prefixes (src/cache/held.ts). */

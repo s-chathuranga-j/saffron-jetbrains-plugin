@@ -1021,6 +1021,8 @@ class SaffronPluginTest : BasePlatformTestCase() {
         assertTrue(held("""{"verified":false}"""))
         assertTrue(held("""{}"""))
         assertTrue(held("""{"verified":true,"importedFrom":{"label":"github:1"}}"""))
+        // One that fails a row, with no note saying so (found in review).
+        assertTrue(held("""{"verified":true,"failedRows":["2"]}"""))
         for (note in listOf("behavior change: x", "insensitive check: x", "volatile locator: x")) {
             assertTrue(note, held("""{"verified":true,"adaptations":["$note"]}"""))
         }

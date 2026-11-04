@@ -190,8 +190,12 @@ object SaffronProjectScan {
     internal fun scenarioKeywords(lines: List<String>): List<String> =
         (SCENARIO_KEYWORDS[languageOf(lines)] ?: SCENARIO_KEYWORDS["en"].orEmpty()).take(2).flatten()
 
+    /** The file's Feature, Background and Rule keywords: the blocks that are no scenario. */
+    internal fun blockKeywords(lines: List<String>): List<String> =
+        (SCENARIO_KEYWORDS[languageOf(lines)] ?: SCENARIO_KEYWORDS["en"])?.getOrNull(3) ?: listOf("Feature", "Business Need", "Ability", "Background", "Rule")
+
     /**
-     * Each language's Scenario, Scenario Outline and Examples keywords, from the Gherkin the
+     * Each language's Scenario, Scenario Outline, Examples and other block (Feature, Background, Rule) keywords, from the Gherkin the
      * runner parses with (a copy of the VS Code extension's assets/scenario-keywords.json).
      */
     private val SCENARIO_KEYWORDS: Map<String, List<List<String>>> by lazy {
