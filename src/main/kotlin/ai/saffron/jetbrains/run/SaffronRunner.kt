@@ -66,8 +66,9 @@ object SaffronRunner {
         c.extraArgs = ""
         c.workingDirectory = SaffronStatusService.getInstance(project).root.toString()
         configure(c)
-        // An accept or reject is never the selected configuration: the Run button would repeat it on whatever is pending then.
-        if (c.command != "accept" && c.command != "reject") runManager.selectedConfiguration = settings
+        // An accept, reject, export or eject is never the selected configuration: the Run button would repeat it on
+        // whatever is pending then, push a branch again, or write specs again.
+        if (c.command !in setOf("accept", "reject", "export", "eject")) runManager.selectedConfiguration = settings
         return settings
     }
 }

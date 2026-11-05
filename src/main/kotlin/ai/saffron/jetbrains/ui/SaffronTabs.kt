@@ -3,6 +3,9 @@ package ai.saffron.jetbrains.ui
 import ai.saffron.jetbrains.run.SaffronCommand
 import ai.saffron.jetbrains.run.SaffronRunner
 import com.intellij.icons.AllIcons
+import com.intellij.util.execution.ParametersListUtil
+import com.intellij.openapi.fileEditor.FileEditorManager
+import com.intellij.openapi.ui.Messages
 import com.intellij.execution.process.CapturingProcessHandler
 import com.intellij.openapi.Disposable
 import com.intellij.openapi.actionSystem.ActionManager
@@ -172,6 +175,10 @@ class ProposalsTab(project: Project, parent: Disposable) : StatusTab(project, pa
             action("Accept Selected", "saffron accept <ticked files>", AllIcons.Actions.Commit) { act("accept", ticked()) },
             action("Reject Selected", "saffron reject <ticked files>", AllIcons.Actions.Cancel) { act("reject", ticked()) },
             action("Accept All", "saffron accept --all (skips proposals that are unverified, not checked, imported from CI, change what a step enters or drop a request or check it made (a requirement not kept), have a check that passes either way, a locator a later day will not find, failed a stability proof or another Examples row, a date that does not follow the clock, a data value kept as written, a check recorded again looser than the one it replaced, a write cut off by the page moving on, or a check that changed the page)", AllIcons.Actions.Checked) { acceptAll() },
+            action("Accept a StepSet's Steps", "saffron accept <ticked file> --step-set <name>: file one StepSet's steps for other scenarios to reuse, the proposal left pending", AllIcons.Nodes.Folder) { acceptStepSet() },
+            action("Open Draft Pull Request", "saffron export --branch <name>: push the pending proposals to a new branch and open a draft pull request", AllIcons.Vcs.Push) { exportPullRequest() },
+            action("Export Bundle", "saffron export: the pending proposals, the last run's report, screenshots and traces in one bundle", AllIcons.Actions.Download) { exportBundle() },
+            action("Eject to Playwright", "saffron eject: write the committed recordings as Playwright specs in the project", AllIcons.Actions.Execute) { eject() },
             action("Refresh", "Reload the status", AllIcons.Actions.Refresh) { refreshStatus() },
         )
         list.setEmptyText("No proposals pending review")
@@ -290,6 +297,62 @@ class ProposalsTab(project: Project, parent: Disposable) : StatusTab(project, pa
         SaffronRunner.execute(project, "Saffron: $command ${selected.size} proposal(s)") {
             it.command = command
             it.paths = SaffronCommand.joinPaths(selected.map { p -> p.target })
+        }
+    }
+
+    /** One ticked proposal's StepSet, chosen when it recorded several, filed for reuse; the proposal stays pending. */
+    private fun acceptStepSet() {
+        val selected = ticked()
+        if (selected.size != 1) {
+            note.text = "Tick the one proposal whose StepSet steps you want to file for reuse."
+            return
+        }
+        val p = selected[0]
+        val sets = p.stepSets.orEmpty()
+        if (sets.isEmpty()) {
+            note.text = "That proposal recorded no StepSet's steps (or this saffron-ai does not list them: update saffron-ai)."
+            return
+        }
+        val name = if (sets.size == 1) sets[0] else Messages.showEditableChooseDialog("The StepSet whose steps other scenarios reuse:", "Accept a StepSet's Steps", null, sets.toTypedArray(), sets[0], null) ?: return
+        SaffronRunner.execute(project, "Saffron: accept StepSet $name") {
+            it.command = "accept"
+            it.paths = SaffronCommand.joinPaths(listOf(p.target))
+            it.extraArgs = ParametersListUtil.join(listOf("--step-set", name))
+        }
+    }
+
+    private fun exportBundle() = SaffronRunner.execute(project, "Saffron: export") { it.command = "export" }
+
+    /** Asked for a branch, then asked again: it pushes to origin and opens a pull request. */
+    private fun exportPullRequest() {
+        val branch = Messages.showInputDialog(project, "Branch for the pending proposals, pushed to origin with a draft pull request:", "Open Draft Pull Request", null, "saffron/proposals-${java.time.LocalDate.now()}", null)?.trim() ?: return
+        if (!SaffronCommand.isBranchName(branch)) {
+            note.text = "A branch name takes letters, digits, '.', '_', '-' and '/', not starting with '-'."
+            return
+        }
+        if (Messages.showYesNoDialog(project, "Push the pending proposals to \"$branch\" on origin and open a draft pull request?", "Open Draft Pull Request", "Push and Open", "Cancel", Messages.getWarningIcon()) != Messages.YES) return
+        SaffronRunner.execute(project, "Saffron: export to $branch") {
+            it.command = "export"
+            it.extraArgs = ParametersListUtil.join(listOf("--branch", branch))
+        }
+    }
+
+    /** Asked first: it writes files into the project. The open feature file alone, or every one. */
+    private fun eject() {
+        val ask = "Write the committed recordings as Playwright specs in the project's playwright/ folder? Files saffron eject did not write are kept."
+        val open = FileEditorManager.getInstance(project).selectedFiles.firstOrNull()?.takeIf { it.extension == "saffron" || it.extension == "feature" }
+        val root = SaffronStatusService.getInstance(project).root
+        val rel = open?.let { runCatching { root.relativize(java.nio.file.Paths.get(it.path)).toString() }.getOrNull() }?.takeIf { !it.startsWith("..") }
+        val paths = if (rel != null) {
+            when (Messages.showYesNoCancelDialog(project, ask, "Eject to Playwright", "This File ($rel)", "Every Feature File", "Cancel", Messages.getQuestionIcon())) {
+                Messages.YES -> rel
+                Messages.NO -> ""
+                else -> return
+            }
+        } else if (Messages.showYesNoDialog(project, ask, "Eject to Playwright", "Write Specs", "Cancel", Messages.getQuestionIcon()) == Messages.YES) "" else return
+        SaffronRunner.execute(project, "Saffron: eject") {
+            it.command = "eject"
+            it.paths = paths
         }
     }
 

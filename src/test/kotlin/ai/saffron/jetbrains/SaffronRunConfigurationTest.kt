@@ -1,5 +1,6 @@
 package ai.saffron.jetbrains
 
+import com.intellij.util.execution.ParametersListUtil
 import ai.saffron.jetbrains.run.SaffronCommand
 import ai.saffron.jetbrains.run.SaffronConfigurationType
 import ai.saffron.jetbrains.run.SaffronRunConfiguration
@@ -907,6 +908,38 @@ class SaffronRunConfigurationTest : BasePlatformTestCase() {
             assertEquals(listOf("run", "--", "features/a.saffron"), SaffronCommand.arguments(c))
         } finally {
             runManager.findConfigurationByTypeAndName(SaffronConfigurationType.INSTANCE, name)?.let(runManager::removeConfiguration)
+        }
+    }
+
+    // Asked for after 1.3.3: export, eject and accept --step-set, as the runner takes them.
+    fun `test export, eject and a StepSet's accept are sent as the runner takes them`() {
+        val c = newConfiguration()
+        c.command = "export"
+        assertEquals(listOf("export"), SaffronCommand.arguments(c))
+        c.extraArgs = ParametersListUtil.join(listOf("--branch", "saffron/review"))
+        assertEquals(listOf("export", "--branch", "saffron/review"), SaffronCommand.arguments(c))
+        c.command = "eject"; c.extraArgs = ""; c.paths = ""
+        assertEquals(listOf("eject"), SaffronCommand.arguments(c))
+        // A file after `--`: one named -wip.saffron is a file.
+        c.paths = "features/-wip.saffron"
+        assertEquals(listOf("eject", "--", "features/-wip.saffron"), SaffronCommand.arguments(c))
+        c.command = "accept"; c.paths = ".saffron/proposals/a/b.json#abc"; c.extraArgs = ParametersListUtil.join(listOf("--step-set", "Sign in"))
+        assertEquals(listOf("accept", ".saffron/proposals/a/b.json#abc", "--step-set", "Sign in"), SaffronCommand.arguments(c))
+        assertTrue(SaffronCommand.isBranchName("saffron/proposals-2026-11-05"))
+        assertFalse(SaffronCommand.isBranchName("--force"))
+        assertFalse(SaffronCommand.isBranchName("a b"))
+    }
+
+    fun `test an export or eject never becomes the configuration the Run button repeats`() {
+        val runManager = RunManager.getInstance(project)
+        val type = SaffronConfigurationType.INSTANCE
+        try {
+            val run = SaffronRunner.prepare(project, "Saffron: run all") {}
+            SaffronRunner.prepare(project, "Saffron: export to x") { it.command = "export" }
+            SaffronRunner.prepare(project, "Saffron: eject") { it.command = "eject" }
+            assertSame(run, runManager.selectedConfiguration)
+        } finally {
+            listOf("Saffron: run all", "Saffron: export to x", "Saffron: eject").forEach { n -> runManager.findConfigurationByTypeAndName(type, n)?.let(runManager::removeConfiguration) }
         }
     }
 

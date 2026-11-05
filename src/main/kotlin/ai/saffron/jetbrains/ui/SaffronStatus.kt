@@ -89,6 +89,8 @@ class StatusProposal(
     val proofError: String? = null,
     /** The Examples rows an Outline's proposal failed on, its proof having passed where it was recorded. */
     val failedRows: List<String>? = null,
+    /** The StepSets whose steps the proposal recorded: `saffron accept <file> --step-set <name>` files one for reuse. */
+    val stepSets: List<String>? = null,
     /** Why the proposal can no longer be accepted as reviewed; null while it is still bound to what it was made against. */
     val stale: String? = null,
     val unbound: Boolean? = null,

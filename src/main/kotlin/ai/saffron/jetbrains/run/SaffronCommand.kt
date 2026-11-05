@@ -116,6 +116,9 @@ object SaffronCommand {
         return command
     }
 
+    /** A branch `saffron export --branch` may push: letters, digits, '.', '_', '-' and '/', never starting with '-'. */
+    fun isBranchName(name: String): Boolean = Regex("^[\\w./-]+$").matches(name) && !name.startsWith("-")
+
     /** The arguments after `saffron` for a configuration. */
     fun arguments(c: SaffronRunConfiguration): List<String> {
         val args = mutableListOf<String>()
@@ -132,6 +135,15 @@ object SaffronCommand {
             "login" -> {
                 args += "login"
                 c.paths.trim().takeIf { it.isNotEmpty() }?.let { args += it }
+            }
+            // The bundle, or with `--branch <name>` in the extra arguments a draft pull request (the tool window asks first).
+            "export" -> args += "export"
+            // Playwright specs: the field holds feature files, after `--` as a run's targets are; blank is every one.
+            "eject" -> {
+                args += "eject"
+                if (c.extraArgs.isNotBlank()) args += ParametersListUtil.parse(c.extraArgs.trim())
+                splitPaths(c.paths).takeIf { it.isNotEmpty() }?.let { args += listOf("--") + it }
+                return args
             }
             "accept", "reject" -> {
                 // The field holds proposal files here; blank means every proposal.
