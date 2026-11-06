@@ -16,7 +16,8 @@ import java.nio.file.Path
  */
 object SaffronCommand {
 
-    val COMMANDS: List<String> = listOf("run", "report", "trace", "accept", "reject", "prune", "login")
+    // export and eject too: the Proposals tab runs them, and a configuration naming a command not listed here never starts (found in review).
+    val COMMANDS: List<String> = listOf("run", "report", "trace", "accept", "reject", "prune", "login", "export", "eject")
 
     /** Nothing is spawned for a project the user has not trusted: its node_modules and config are its own code. */
     fun trusted(project: Project): Boolean = isTrusted?.invoke(null, project) as? Boolean ?: false

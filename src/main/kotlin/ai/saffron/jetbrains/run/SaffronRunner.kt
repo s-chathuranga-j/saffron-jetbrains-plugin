@@ -68,7 +68,8 @@ object SaffronRunner {
         configure(c)
         // An accept, reject, export or eject is never the selected configuration: the Run button would repeat it on
         // whatever is pending then, push a branch again, or write specs again.
-        if (c.command !in setOf("accept", "reject", "export", "eject")) runManager.selectedConfiguration = settings
+        // A prune too: after its confirmation it carries --yes, and Run would delete what is orphaned then, unasked (found in review).
+        if (c.command !in setOf("accept", "reject", "export", "eject", "prune")) runManager.selectedConfiguration = settings
         return settings
     }
 }

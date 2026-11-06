@@ -27,7 +27,7 @@ class SaffronSettingsEditor : SettingsEditor<SaffronRunConfiguration>() {
     private val panel: JPanel = FormBuilder.createFormBuilder()
         .addLabeledComponent("Command:", command)
         .addLabeledComponent(pathsLabel, paths)
-        .addTooltip("Relative to the project root, separated by spaces; put a path that contains a space in double quotes. run: feature files or folders, blank runs the configured test folder (features in saffron.config.json). accept / reject: proposal files, blank means --all. trace: one scenario name, or feature:scenario, quotes optional; blank opens every traced scenario. login: the provider (claude, codex, antigravity or cursor), blank checks the configured one.")
+        .addTooltip("Relative to the project root, separated by spaces; put a path that contains a space in double quotes. run: feature files or folders, blank runs the configured test folder (features in saffron.config.json). accept / reject: proposal files, blank means --all. trace: one scenario name, or feature:scenario, quotes optional; blank opens every traced scenario. login: the provider (claude, codex, antigravity or cursor), blank checks the configured one. eject: feature files, blank ejects every one. export reads none.")
         .addLabeledComponent("Tags:", tags)
         .addTooltip("A list of tags, any of which runs a scenario (for example @smoke,@checkout), or an expression (for example \"@e2e and not @wip\").")
         .addComponent(replayOnly)
@@ -51,9 +51,11 @@ class SaffronSettingsEditor : SettingsEditor<SaffronRunConfiguration>() {
             "trace" -> "Scenario:"
             "accept", "reject" -> "Proposal files:"
             "login" -> "Provider:"
+            "eject" -> "Feature files:"
             else -> "Files or folders:"
         }
-        paths.isEnabled = selected != "report" && selected != "prune"
+        // export reads no paths: its extra arguments (--branch) say where the bundle goes (found in review).
+        paths.isEnabled = selected != "report" && selected != "prune" && selected != "export"
         for (c in listOf(tags, replayOnly, headed, rerecord)) c.isEnabled = selected == "run"
     }
 

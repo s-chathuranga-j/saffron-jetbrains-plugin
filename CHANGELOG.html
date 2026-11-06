@@ -1,6 +1,9 @@
 <h3>Unreleased</h3>
 <ul>
+  <li>Export Bundle, Open Draft Pull Request and Eject to Playwright run: the commands were missing from the configuration's list, so the IDE refused them before starting. A confirmed prune never becomes the configuration the Run button repeats, so Run never deletes recordings unasked.</li>
   <li>The Proposals tab's toolbar exports the review bundle (<code>saffron export</code>), opens a draft pull request with the pending proposals after asking for a branch and confirming (<code>export --branch</code>), writes the recordings as Playwright specs after asking, for the open file or every one (<code>saffron eject</code>), and files one ticked proposal's StepSet steps for reuse (<code>accept --step-set</code>). Neither export nor eject becomes the configuration the Run button repeats.</li>
+  <li>In a Saffron run configuration, the paths field is off for export, which reads none, is named Feature files for eject, and its tooltip covers both. The Files tab notices a nested project's config added or removed, and a folder deleted, moved or renamed.</li>
+  <li>A run name that starts with "&lt;" shows as text in the CI Runs tab.</li>
 </ul>
 <h3>0.8.0</h3>
 <ul>

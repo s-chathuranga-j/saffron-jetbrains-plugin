@@ -962,7 +962,9 @@ class CiRunsTab(
     }
 
     private fun summary(result: RunImport, run: CiRun): String {
-        result.error?.let { return "${run.name} #${run.number} was not imported: $it" }
+        // A label starting with "<html>" renders as HTML, and a workflow's name is anyone's who opens a pull request: a
+        // zero-width space before a name starting with "<" keeps it text (found in review).
+        result.error?.let { return "${if (run.name.startsWith("<")) "\u200B" else ""}${run.name} #${run.number} was not imported: $it" }
         val imported = result.proposals.count { it.outcome == "imported" }
         val refused = result.proposals.count { it.outcome == "refused" }
         val warned = if (result.warnings.isNotEmpty()) "${result.warnings.size} warning${if (result.warnings.size == 1) "" else "s"}" else null

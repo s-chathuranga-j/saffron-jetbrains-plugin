@@ -440,7 +440,7 @@ class SaffronRunConfigurationTest : BasePlatformTestCase() {
         c.command = "bogus"
         assertThrows(
             RuntimeConfigurationError::class.java,
-            "Unknown Saffron command \"bogus\"; use run, report, trace, accept, reject, prune or login",
+            "Unknown Saffron command \"bogus\"; use run, report, trace, accept, reject, prune, login, export or eject",
             ThrowableRunnable<Throwable> { c.checkConfiguration() },
         )
     }
@@ -930,16 +930,20 @@ class SaffronRunConfigurationTest : BasePlatformTestCase() {
         assertFalse(SaffronCommand.isBranchName("a b"))
     }
 
-    fun `test an export or eject never becomes the configuration the Run button repeats`() {
+    fun `test an export, eject or prune never becomes the configuration the Run button repeats, and export and eject check out`() {
         val runManager = RunManager.getInstance(project)
         val type = SaffronConfigurationType.INSTANCE
         try {
             val run = SaffronRunner.prepare(project, "Saffron: run all") {}
-            SaffronRunner.prepare(project, "Saffron: export to x") { it.command = "export" }
-            SaffronRunner.prepare(project, "Saffron: eject") { it.command = "eject" }
+            val export = SaffronRunner.prepare(project, "Saffron: export to x") { it.command = "export" }
+            val eject = SaffronRunner.prepare(project, "Saffron: eject") { it.command = "eject" }
+            SaffronRunner.prepare(project, "Saffron: prune") { it.command = "prune"; it.extraArgs = "--yes" }
             assertSame(run, runManager.selectedConfiguration)
+            // Found in review: a command missing from COMMANDS failed its check, so the action never started.
+            (export.configuration as SaffronRunConfiguration).checkConfiguration()
+            (eject.configuration as SaffronRunConfiguration).checkConfiguration()
         } finally {
-            listOf("Saffron: run all", "Saffron: export to x", "Saffron: eject").forEach { n -> runManager.findConfigurationByTypeAndName(type, n)?.let(runManager::removeConfiguration) }
+            listOf("Saffron: run all", "Saffron: export to x", "Saffron: eject", "Saffron: prune").forEach { n -> runManager.findConfigurationByTypeAndName(type, n)?.let(runManager::removeConfiguration) }
         }
     }
 
