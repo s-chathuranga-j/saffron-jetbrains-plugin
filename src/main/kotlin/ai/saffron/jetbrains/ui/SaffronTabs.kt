@@ -345,7 +345,10 @@ class ProposalsTab(project: Project, parent: Disposable) : StatusTab(project, pa
     private fun eject() {
         val ask = "Write the committed recordings as Playwright specs in the project's playwright/ folder? Files saffron eject did not write are kept."
         val open = FileEditorManager.getInstance(project).selectedFiles.firstOrNull()?.takeIf { it.extension == "saffron" || it.extension == "feature" }
-        val root = SaffronStatusService.getInstance(project).root
+        // The open file's own Saffron project, which may be nested in the one the tool window shows: eject reads its
+        // recordings and config and writes its playwright/ folder, as VS Code does.
+        val shown = SaffronStatusService.getInstance(project).root
+        val root = open?.let { f -> project.basePath?.let { SaffronRoots.rootFor(java.nio.file.Paths.get(f.path), java.nio.file.Paths.get(it)) } } ?: shown
         val rel = open?.let { runCatching { root.relativize(java.nio.file.Paths.get(it.path)).toString() }.getOrNull() }?.takeIf { inProject(it) }
         val paths = if (rel != null) {
             when (Messages.showYesNoCancelDialog(project, ask, "Eject to Playwright", "This File ($rel)", "Every Feature File", "Cancel", Messages.getQuestionIcon())) {
@@ -357,6 +360,7 @@ class ProposalsTab(project: Project, parent: Disposable) : StatusTab(project, pa
         SaffronRunner.execute(project, "Saffron: eject") {
             it.command = "eject"
             it.paths = paths
+            if (paths.isNotEmpty()) it.workingDirectory = root.toString()
         }
     }
 
