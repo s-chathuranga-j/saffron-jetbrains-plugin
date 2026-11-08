@@ -1075,6 +1075,25 @@ class SaffronPluginTest : BasePlatformTestCase() {
         assertFalse(ai.saffron.jetbrains.ui.inProject(".."))
     }
 
+    /** Found in the 1.4.0 release review: a file outside the nested Saffron projects was ejected in the IDE project. */
+    fun `test Eject runs in the open file's own Saffron project, never a folder that is none`() {
+        val base = java.nio.file.Files.createTempDirectory("saffron-eject")
+        try {
+            val app = java.nio.file.Files.createDirectories(base.resolve("app"))
+            java.nio.file.Files.writeString(app.resolve("saffron.config.json"), "{}")
+            java.nio.file.Files.createDirectories(app.resolve("features"))
+            java.nio.file.Files.createDirectories(base.resolve("other"))
+            val shown = app
+            assertEquals(app, ai.saffron.jetbrains.ui.ejectRoot(app.resolve("features/x.saffron"), base, shown, listOf(app)))
+            // Another tool's feature file: the IDE project is no Saffron project, so the shown one is used.
+            assertEquals(shown, ai.saffron.jetbrains.ui.ejectRoot(base.resolve("other/x.feature"), base, shown, listOf(app)))
+            // A project the tool window discovered without a config file of its own.
+            assertEquals(base, ai.saffron.jetbrains.ui.ejectRoot(base.resolve("x.saffron"), base, shown, listOf(base)))
+        } finally {
+            base.toFile().deleteRecursively()
+        }
+    }
+
     fun `test Eject This File keeps a path with a space whole`() {
         if (SystemInfo.isWindows) return
         val base = Path.of(project.basePath!!)

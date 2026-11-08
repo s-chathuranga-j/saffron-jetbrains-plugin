@@ -347,9 +347,13 @@ class ProposalsTab(project: Project, parent: Disposable) : StatusTab(project, pa
         val open = FileEditorManager.getInstance(project).selectedFiles.firstOrNull()?.takeIf { it.extension == "saffron" || it.extension == "feature" }
         // The open file's own Saffron project, which may be nested in the one the tool window shows: eject reads its
         // recordings and config and writes its playwright/ folder, as VS Code does.
-        val shown = SaffronStatusService.getInstance(project).root
-        val root = open?.let { f -> project.basePath?.let { SaffronRoots.rootFor(java.nio.file.Paths.get(f.path), java.nio.file.Paths.get(it)) } } ?: shown
-        val rel = open?.let { runCatching { root.relativize(java.nio.file.Paths.get(it.path)).toString() }.getOrNull() }?.takeIf { inProject(it) }
+        val service = SaffronStatusService.getInstance(project)
+        val shown = service.root
+        // Only a Saffron project: rootFor falls back to the IDE project, which is none when the projects are nested in
+        // it, and eject would write specs there for another tool's file (found in review).
+        val root = open?.let { ejectRoot(java.nio.file.Paths.get(it.path), project.basePath?.let { b -> java.nio.file.Paths.get(b) }, shown, service.roots) } ?: shown
+        // Forward slashes on every platform, as VS Code sends them and the runner reads them.
+        val rel = open?.let { runCatching { com.intellij.openapi.util.io.FileUtil.toSystemIndependentName(root.relativize(java.nio.file.Paths.get(it.path)).toString()) }.getOrNull() }?.takeIf { inProject(it) }
         val paths = if (rel != null) {
             when (Messages.showYesNoCancelDialog(project, ask, "Eject to Playwright", "This File ($rel)", "Every Feature File", "Cancel", Messages.getQuestionIcon())) {
                 Messages.YES -> SaffronCommand.joinPaths(listOf(rel))
@@ -488,4 +492,11 @@ internal class DiffLoad {
 }
 
 /** A path relative to the project inside it: its first segment is not "..", so a folder named "..data" is inside, as in VS Code. */
+/**
+ * The Saffron project an open file is ejected in: its own (nested) project, one with a saffron.config.json or one the
+ * tool window discovered, else the one the tool window shows.
+ */
+internal fun ejectRoot(file: java.nio.file.Path, base: java.nio.file.Path?, shown: java.nio.file.Path, roots: List<java.nio.file.Path>): java.nio.file.Path =
+    base?.let { SaffronRoots.rootFor(file, it) }?.takeIf { java.nio.file.Files.exists(it.resolve("saffron.config.json")) || it in roots } ?: shown
+
 internal fun inProject(rel: String): Boolean = rel.split('/', '\\').firstOrNull() != ".." && !java.nio.file.Paths.get(rel).isAbsolute
