@@ -1243,6 +1243,44 @@ class SaffronPluginTest : BasePlatformTestCase() {
         assertTrue(bare.contains("Content-Security-Policy") && !bare.contains("window.saffronOpen"))
     }
 
+    fun `test the Dashboard loads the same runner output once, though each page gets a fresh nonce`() {
+        val loads = mutableListOf<String>()
+        val loader = ai.saffron.jetbrains.ui.PageLoader { loads += it }
+        val stdout = "<html><head></head><body><script>use()</script></body></html>"
+        val first = ai.saffron.jetbrains.ui.withOpener(stdout, "open(f, s)")
+        val second = ai.saffron.jetbrains.ui.withOpener(stdout, "open(f, s)")
+        assertFalse(first == second)
+        loader.show("dashboard:$stdout", first)
+        loader.show("dashboard:$stdout", second)
+        assertEquals(listOf(first), loads)
+        // New output, or a message between, loads again.
+        loader.show("message:x", "x")
+        loader.show("dashboard:$stdout", second)
+        assertEquals(listOf(first, "x", second), loads)
+    }
+
+    fun `test both Accept All tooltips name every case the runner holds, the database ones too`() {
+        for (tip in listOf(ai.saffron.jetbrains.ui.PROPOSALS_ACCEPT_ALL_TIP, ai.saffron.jetbrains.ui.FILES_ACCEPT_ALL_TIP)) {
+            assertTrue(tip, tip.contains(ai.saffron.jetbrains.ui.ACCEPT_ALL_SKIPS))
+            assertTrue(tip, tip.contains("a database check whose query was repaired after a schema change"))
+            assertTrue(tip, tip.contains("a database write the heal added"))
+        }
+    }
+
+    fun `test a diff load cancelled before it starts never starts its process`() {
+        val load = ai.saffron.jetbrains.ui.DiffLoad()
+        load.cancel()
+        var built = false
+        assertNull(load.start { built = true; error("must not start") })
+        assertFalse(built)
+    }
+
+    fun `test the install notice says the language server runs through npx until then`() {
+        val hint = ai.saffron.jetbrains.INSTALL_HINT
+        assertTrue(hint, hint.contains("npx") && hint.contains("trusted project"))
+        assertFalse(hint, hint.contains("starts once the package is present"))
+    }
+
     fun `test a run row says what it left to view, from saffron runs --json`() {
         val listed = Gson().fromJson(
             """{"provider":"github","runs":[{"id":"1","results":{"kind":"full","sizeBytes":3145728,"label":"results, 3 MB"}},{"id":"2","results":{"kind":"summary","sizeBytes":10,"label":"summary only, under 1 MB"}},{"id":"3","results":{"kind":"expired","label":"results expired"}},{"id":"4","results":{"kind":"running","label":"still running"}},{"id":"5"}]}""",

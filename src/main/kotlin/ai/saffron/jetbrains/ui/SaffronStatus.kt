@@ -129,6 +129,15 @@ internal val HELD_NOTES = listOf(
     "database check repaired after a schema change:", "database write added by the heal:",
 )
 
+/** In words, the proposals `saffron accept --all` skips: the three kinds above, then each of [HELD_NOTES] in turn. */
+internal const val ACCEPT_ALL_SKIPS =
+    "unverified, not checked, imported from CI, " +
+        "change what a step enters or drop a request or check it made (a requirement not kept), have a check that passes either way, a locator a later day will not find, failed a stability proof or another Examples row, a date that does not follow the clock, a data value kept as written, a check recorded again looser than the one it replaced, a write cut off by the page moving on, a check that changed the page, a database check whose query was repaired after a schema change, or a database write the heal added"
+
+/** The Accept All tooltip in the Proposals tab and in the Files tab: the same list in both. */
+internal const val PROPOSALS_ACCEPT_ALL_TIP = "saffron accept --all (skips proposals that are $ACCEPT_ALL_SKIPS)"
+internal const val FILES_ACCEPT_ALL_TIP = "saffron accept --all: promote pending proposals to committed caches, except those that are $ACCEPT_ALL_SKIPS"
+
 /** Where an imported proposal came from: the run ("github:901") and its link, the branch and commit, the shard. */
 class ImportedFrom(
     val repository: String? = null,

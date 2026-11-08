@@ -174,18 +174,11 @@ class ProposalsTab(project: Project, parent: Disposable) : StatusTab(project, pa
     /** `saffron diff` for a proposal file; built off the UI thread (it reads the disk and starts a process). */
     internal var diffCommand: (String, String) -> GeneralCommandLine = { base, file -> SaffronCommand.base(base).withParameters("diff", file) }
 
-    /** One diff load: its process is started on a pooled thread, and cancelling destroys it whenever it exists. */
-    private class DiffLoad {
-        @Volatile var handler: CapturingProcessHandler? = null
-        @Volatile var cancelled = false
-        fun cancel() { cancelled = true; handler?.destroyProcess() }
-    }
-
     init {
         toolbar = toolbar(
             action("Accept Selected", "saffron accept <ticked files>", AllIcons.Actions.Commit) { act("accept", ticked()) },
             action("Reject Selected", "saffron reject <ticked files>", AllIcons.Actions.Cancel) { act("reject", ticked()) },
-            action("Accept All", "saffron accept --all (skips proposals that are unverified, not checked, imported from CI, change what a step enters or drop a request or check it made (a requirement not kept), have a check that passes either way, a locator a later day will not find, failed a stability proof or another Examples row, a date that does not follow the clock, a data value kept as written, a check recorded again looser than the one it replaced, a write cut off by the page moving on, a check that changed the page, a database check whose query was repaired after a schema change, or a database write the heal added)", AllIcons.Actions.Checked) { acceptAll() },
+            action("Accept All", PROPOSALS_ACCEPT_ALL_TIP, AllIcons.Actions.Checked) { acceptAll() },
             action("Accept a StepSet's Steps", "saffron accept <ticked file> --step-set <name>: file one StepSet's steps for other scenarios to reuse, the proposal left pending", AllIcons.Nodes.Folder) { acceptStepSet() },
             action("Open Draft Pull Request", "saffron export --branch <name>: push the pending proposals to a new branch and open a draft pull request", AllIcons.Vcs.Push) { exportPullRequest() },
             action("Export Bundle", "saffron export: the pending proposals, the last run's report, screenshots and traces in one bundle", AllIcons.Actions.Download) { exportBundle() },
@@ -266,12 +259,11 @@ class ProposalsTab(project: Project, parent: Disposable) : StatusTab(project, pa
         ApplicationManager.getApplication().executeOnPooledThread {
             val text = try {
                 // Built here, not in the selection listener: base() reads the disk and the login-shell environment, and the handler starts the process.
-                val handler = CapturingProcessHandler(command(base, proposal.file)).apply { setShouldDestroyProcessRecursively(true) }
-                load.handler = handler
-                // Cancelled before the handler existed: cancel() saw no process to destroy.
-                if (load.cancelled) handler.destroyProcess()
-                val output = processes.tracked { it.runProcess(60_000, true) }(handler)
-                if (output.exitCode == 0 && output.stdout.isNotBlank()) {
+                val handler = load.start { CapturingProcessHandler(command(base, proposal.file)).apply { setShouldDestroyProcessRecursively(true) } }
+                val output = handler?.let { processes.tracked { p -> p.runProcess(60_000, true) }(it) }
+                if (output == null) {
+                    "" // Cancelled before it started: never shown, never cached.
+                } else if (output.exitCode == 0 && output.stdout.isNotBlank()) {
                     DIFF_HEADING + output.stdout.trim()
                 } else {
                     "\n\n(could not load the diff: " + commandProblem(output, "diff", 60) + ")"
@@ -472,3 +464,21 @@ internal const val DIFF_HEADING = "\n\nWHAT THIS PROPOSAL CHANGES\n\n"
 
 /** The feature edits for the details pane: none when a loaded diff beside them lists them already. */
 internal fun editsBeside(edits: List<StatusFeatureEdit>?, diff: String): String = if (diff.startsWith(DIFF_HEADING)) "" else featureEditText(edits)
+
+/** One diff load: its process is started on a pooled thread, and cancelling destroys it whenever it exists. */
+internal class DiffLoad {
+    @Volatile private var handler: CapturingProcessHandler? = null
+    @Volatile private var cancelled = false
+
+    fun cancel() { cancelled = true; handler?.destroyProcess() }
+
+    /** [start]'s process, or null when the load was cancelled first: then no process is ever started. */
+    fun start(start: () -> CapturingProcessHandler): CapturingProcessHandler? {
+        if (cancelled) return null
+        val h = start()
+        handler = h
+        // Cancelled while it started: cancel() saw no process to destroy.
+        if (cancelled) h.destroyProcess()
+        return h
+    }
+}

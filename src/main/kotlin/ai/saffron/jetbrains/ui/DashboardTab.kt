@@ -50,8 +50,8 @@ class DashboardTab(project: Project, parent: Disposable) : StatusTab(project, pa
     private var shownFor: Pair<java.nio.file.Path, List<StatusFeature>>? = null
     /** A status arrived while the tab was hidden: rendering waits until it is shown. */
     private var stale = true
-    /** The page as last loaded: an unchanged one is not reloaded (and scrolled to the top). */
-    private var shown: String? = null
+    /** Loads a page only when what it was made from changed: a refresh with the same runner output keeps the scroll and filter. */
+    private val loader = PageLoader { html -> browser?.loadHTML(html) }
 
     init {
         toolbar = toolbar(action("Refresh", "Reload the status and the dashboard", AllIcons.Actions.Refresh) { refreshStatus() })
@@ -88,7 +88,7 @@ class DashboardTab(project: Project, parent: Disposable) : StatusTab(project, pa
         latest = status
         // Before anything else: a load still running for the last status must not land after this one.
         val loadFor = ++generation
-        val b = browser ?: return
+        if (browser == null) return
         if (!isShowing) {
             stale = true
             return
@@ -97,33 +97,47 @@ class DashboardTab(project: Project, parent: Disposable) : StatusTab(project, pa
         val root = projectRoot
         val features = status?.features ?: emptyList()
         when {
-            status == null -> show(b, message("Loading…"), null)
+            status == null -> show(message("Loading…"), null)
             !runnerAtLeast(status.version, 0, 9, 4) ->
-                show(b, message("The dashboard needs saffron-ai 0.9.4 or later; this project has ${status.version}. Run npm i -D saffron-ai@latest."), null)
+                show(message("The dashboard needs saffron-ai 0.9.4 or later; this project has ${status.version}. Run npm i -D saffron-ai@latest."), null)
             else -> {
                 val base = root.toString()
                 val js = openQuery?.inject("f + '\\n' + s") ?: ""
                 ApplicationManager.getApplication().executeOnPooledThread {
-                    var rendered = false
+                    // The runner's output, not the page: withOpener gives each page a fresh nonce, so two pages never match.
+                    var stdout: String? = null
                     val page = try {
                         val handler = CapturingProcessHandler(SaffronCommand.base(base).withParameters("dashboard", "--stdout")).apply { setShouldDestroyProcessRecursively(true) }
                         val out = processes.tracked { it.runProcess(60_000, true) }(handler)
-                        if (out.exitCode == 0 && out.stdout.isNotBlank()) withOpener(out.stdout, js).also { rendered = true }
+                        if (out.exitCode == 0 && out.stdout.isNotBlank()) withOpener(out.stdout, js).also { stdout = out.stdout }
                         else message("Could not load the dashboard: ${commandProblem(out, "dashboard", 60)}")
                     } catch (e: Exception) {
                         message("Could not load the dashboard: ${e.message ?: e}")
                     }
-                    ApplicationManager.getApplication().invokeLater({ if (loadFor == generation) show(b, page, if (rendered) root to features else null) }, project.disposed)
+                    val made = stdout
+                    ApplicationManager.getApplication().invokeLater({
+                        if (loadFor == generation) show(page, if (made != null) root to features else null, made?.let { "dashboard:$it" })
+                    }, project.disposed)
                 }
             }
         }
     }
 
-    private fun show(b: JBCefBrowser, html: String, scenariosFrom: Pair<java.nio.file.Path, List<StatusFeature>>?) {
+    /** [madeFrom] is what the page was built from (the runner's output); a message is its own. */
+    private fun show(html: String, scenariosFrom: Pair<java.nio.file.Path, List<StatusFeature>>?, madeFrom: String? = null) {
         shownFor = scenariosFrom
-        if (html == shown) return
-        shown = html
-        b.loadHTML(html)
+        loader.show(madeFrom ?: "message:$html", html)
+    }
+}
+
+/** Loads a page only when [show] is given a different [madeFrom] than the page on screen was. */
+internal class PageLoader(private val load: (String) -> Unit) {
+    private var shown: String? = null
+
+    fun show(madeFrom: String, html: String) {
+        if (madeFrom == shown) return
+        shown = madeFrom
+        load(html)
     }
 }
 

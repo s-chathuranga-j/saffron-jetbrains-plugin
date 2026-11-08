@@ -40,10 +40,8 @@ class SaffronStartupActivity : ProjectActivity {
             hintOnce(
                 project,
                 HINT_SHOWN_KEY,
-                "Saffron: install the runner for completion and diagnostics",
-                "This project has a saffron.config.json but no saffron-ai package. " +
-                    "Run <code>npm i -D saffron-ai</code>. Highlighting works already; " +
-                    "the language server starts once the package is present.",
+                "Saffron: install the runner in this project",
+                INSTALL_HINT,
             )
         }
     }
@@ -77,3 +75,12 @@ class SaffronStartupActivity : ProjectActivity {
         const val LSP_HINT_SHOWN_KEY = "ai.saffron.jetbrains.lsp4ijHintShown"
     }
 }
+
+/**
+ * Without the package, SaffronCommand.base() falls back to npx for the language server too,
+ * and SaffronLanguageServerFactory starts it only in a trusted project.
+ */
+internal const val INSTALL_HINT =
+    "This project has a saffron.config.json but no saffron-ai package. Run <code>npm i -D saffron-ai</code>. " +
+        "Highlighting works already. Until then, in a trusted project, the language server runs through " +
+        "<code>npx</code>, which downloads saffron-ai the first time; in an untrusted project it does not start."
