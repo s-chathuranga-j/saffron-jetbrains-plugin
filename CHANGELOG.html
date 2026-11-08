@@ -4,7 +4,7 @@
   <li>The Dashboard tab reloads only when the runner's page changed, so a status refresh no longer scrolls it back to the top and resets its filter.</li>
   <li>A proposal's diff that is no longer wanted when its load begins never starts <code>saffron diff</code>.</li>
   <li>The notice for a project without the saffron-ai package says that, in a trusted project, the language server runs through <code>npx</code> until it is installed.</li>
-  <li>Eject to Playwright's This File choice passes a file whose name has a space as one path. It used to split in two.</li>
+  <li>Eject to Playwright's This File choice passes a file whose name has a space as one path. It used to split in two. A file in a folder named <code>..data</code> is offered too: only a path that leaves the project is not.</li>
   <li>Selecting a proposal no longer reads the disk or starts <code>saffron diff</code> on the UI thread.</li>
   <li>The Dashboard tab loads the runner's page under the same Content-Security-Policy as the CI results page: only the page's own script and the plugin's opener run.</li>
 </ul>

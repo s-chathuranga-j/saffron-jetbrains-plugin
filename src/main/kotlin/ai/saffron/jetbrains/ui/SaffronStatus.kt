@@ -129,7 +129,7 @@ internal val HELD_NOTES = listOf(
     "database check repaired after a schema change:", "database write added by the heal:",
 )
 
-/** In words, the proposals `saffron accept --all` skips: the three kinds above, then each of [HELD_NOTES] in turn. */
+/** In words, the proposals `saffron accept --all` skips: the three kinds above, then every case in [HELD_NOTES] (not in its order; two phrases cover two notes each). */
 internal const val ACCEPT_ALL_SKIPS =
     "unverified, not checked, imported from CI, " +
         "change what a step enters or drop a request or check it made (a requirement not kept), have a check that passes either way, a locator a later day will not find, failed a stability proof or another Examples row, a date that does not follow the clock, a data value kept as written, a check recorded again looser than the one it replaced, a write cut off by the page moving on, a check that changed the page, a database check whose query was repaired after a schema change, or a database write the heal added"

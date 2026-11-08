@@ -1068,6 +1068,13 @@ class SaffronPluginTest : BasePlatformTestCase() {
     }
 
     /** Eject "This File" passes the file as one path, quoted like every other: a space used to split it in two. */
+    fun `test a folder named dot-dot-data is inside the project, a parent path is not`() {
+        assertTrue(ai.saffron.jetbrains.ui.inProject("..data/x.saffron"))
+        assertTrue(ai.saffron.jetbrains.ui.inProject("features/x.saffron"))
+        assertFalse(ai.saffron.jetbrains.ui.inProject("../x.saffron"))
+        assertFalse(ai.saffron.jetbrains.ui.inProject(".."))
+    }
+
     fun `test Eject This File keeps a path with a space whole`() {
         if (SystemInfo.isWindows) return
         val base = Path.of(project.basePath!!)

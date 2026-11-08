@@ -346,7 +346,7 @@ class ProposalsTab(project: Project, parent: Disposable) : StatusTab(project, pa
         val ask = "Write the committed recordings as Playwright specs in the project's playwright/ folder? Files saffron eject did not write are kept."
         val open = FileEditorManager.getInstance(project).selectedFiles.firstOrNull()?.takeIf { it.extension == "saffron" || it.extension == "feature" }
         val root = SaffronStatusService.getInstance(project).root
-        val rel = open?.let { runCatching { root.relativize(java.nio.file.Paths.get(it.path)).toString() }.getOrNull() }?.takeIf { !it.startsWith("..") }
+        val rel = open?.let { runCatching { root.relativize(java.nio.file.Paths.get(it.path)).toString() }.getOrNull() }?.takeIf { inProject(it) }
         val paths = if (rel != null) {
             when (Messages.showYesNoCancelDialog(project, ask, "Eject to Playwright", "This File ($rel)", "Every Feature File", "Cancel", Messages.getQuestionIcon())) {
                 Messages.YES -> SaffronCommand.joinPaths(listOf(rel))
@@ -482,3 +482,6 @@ internal class DiffLoad {
         return h
     }
 }
+
+/** A path relative to the project inside it: its first segment is not "..", so a folder named "..data" is inside, as in VS Code. */
+internal fun inProject(rel: String): Boolean = rel.split('/', '\\').firstOrNull() != ".." && !java.nio.file.Paths.get(rel).isAbsolute
