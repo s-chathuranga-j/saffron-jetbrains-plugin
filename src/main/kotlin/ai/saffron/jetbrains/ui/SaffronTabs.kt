@@ -491,7 +491,6 @@ internal class DiffLoad {
     }
 }
 
-/** A path relative to the project inside it: its first segment is not "..", so a folder named "..data" is inside, as in VS Code. */
 /**
  * The Saffron project an open file is ejected in: its own (nested) project, one with a saffron.config.json or one the
  * tool window discovered, else the one the tool window shows.
@@ -499,4 +498,5 @@ internal class DiffLoad {
 internal fun ejectRoot(file: java.nio.file.Path, base: java.nio.file.Path?, shown: java.nio.file.Path, roots: List<java.nio.file.Path>): java.nio.file.Path =
     base?.let { SaffronRoots.rootFor(file, it) }?.takeIf { java.nio.file.Files.exists(it.resolve("saffron.config.json")) || it in roots } ?: shown
 
+/** A path relative to the project inside it: its first segment is not "..", so a folder named "..data" is inside, as in VS Code. */
 internal fun inProject(rel: String): Boolean = rel.split('/', '\\').firstOrNull() != ".." && !java.nio.file.Paths.get(rel).isAbsolute
