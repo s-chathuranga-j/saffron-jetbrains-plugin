@@ -81,11 +81,15 @@ internal fun resultsWords(results: CiResults?): String? = results?.takeIf { it.k
  * with `saffronAct(action, feature, scenario, browser)` defined before its own script
  * runs when [actJs] wires one. Any other script, however it got into the page, is refused.
  */
-internal fun withActions(html: String, actJs: String): String {
+internal fun withActions(html: String, actJs: String): String =
+    withPolicy(html, if (actJs.isEmpty()) "" else "window.saffronAct = function (a, f, s, b) { $actJs };")
+
+/** A runner page under a nonce Content-Security-Policy: only its own scripts, and [js] (defined first), run. */
+internal fun withPolicy(html: String, js: String): String {
     val nonce = java.util.UUID.randomUUID().toString().replace("-", "")
     val csp = "<meta http-equiv=\"Content-Security-Policy\" content=\"default-src 'none'; script-src 'nonce-$nonce'; " +
         "style-src 'unsafe-inline' https://fonts.googleapis.com; font-src https://fonts.gstatic.com; img-src data:;\">"
-    val script = if (actJs.isEmpty()) "" else "<script nonce=\"$nonce\">window.saffronAct = function (a, f, s, b) { $actJs };</script>"
+    val script = if (js.isEmpty()) "" else "<script nonce=\"$nonce\">$js</script>"
     val page = html.replace("<script>", "<script nonce=\"$nonce\">")
     val head = page.indexOf("<head>")
     return if (head < 0) csp + script + page else page.substring(0, head + 6) + csp + script + page.substring(head + 6)

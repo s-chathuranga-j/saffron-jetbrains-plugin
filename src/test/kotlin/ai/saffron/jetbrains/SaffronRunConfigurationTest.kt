@@ -791,6 +791,20 @@ class SaffronRunConfigurationTest : BasePlatformTestCase() {
         assertEquals("I should see the error", attention.evidence[1].step)
     }
 
+    /** What `saffron status --json` prints in 1.4.0, with its `database` block: the plugin reads what it knows and is not thrown by the rest. */
+    fun `test the 1_4_0 status JSON parses`() {
+        val s = Gson().fromJson(javaClass.getResource("/status-1.4.0.json")!!.readText(), ProjectStatus::class.java)
+        assertEquals("1.4.0", s.version)
+        assertFalse(s.packageInstalled)
+        assertEquals("features", s.featuresDir)
+        assertEquals("Save", s.features.single().scenarios.single().name)
+        assertEquals(3, s.features.single().scenarios.single().line)
+        assertEquals("{env:DATABASE_URL}", s.config.effective.getAsJsonObject("db").get("url").asString)
+        assertEquals(emptyList<Any>(), s.proposals)
+        assertEquals(true, s.orphanScan!!.complete)
+        assertNull(s.lastRun)
+    }
+
     fun `test a cost the runner omits is not reported, never a measured zero`() {
         val s = fixture()
         assertNull(s.lastRun!!.totals.costUsd)

@@ -1,0 +1,119 @@
+{
+  "tool": "saffron",
+  "version": "1.4.0",
+  "projectRoot": "/work/proj",
+  "packageInstalled": false,
+  "config": {
+    "file": "saffron.config.json",
+    "effective": {
+      "provider": "claude",
+      "features": "features",
+      "dataDir": "data",
+      "actionTimeoutMs": 5000,
+      "pollIntervalMs": 100,
+      "retries": 1,
+      "screenshot": "viewport",
+      "maxTurns": 100,
+      "strict": false,
+      "verifyProposals": true,
+      "snapshotMode": "none",
+      "reuseSteps": true,
+      "browser": "chromium",
+      "workers": 1,
+      "agentWorkers": 1,
+      "assertionPolicy": "strict",
+      "hookTimeoutMs": 300000,
+      "trace": "off",
+      "video": "off",
+      "baseURL": "http://localhost:3000",
+      "db": {
+        "url": "{env:DATABASE_URL}",
+        "writes": true,
+        "allow": [
+          "localhost"
+        ],
+        "cleanup": "inserts"
+      }
+    }
+  },
+  "database": {
+    "configured": true,
+    "engine": "postgres",
+    "writes": true,
+    "allowlisted": true,
+    "cleanup": "inserts",
+    "timeoutMs": 3000
+  },
+  "featuresDir": "features",
+  "features": [
+    {
+      "path": "features/shop.saffron",
+      "name": "Shop",
+      "scenarios": [
+        {
+          "name": "Save",
+          "line": 3,
+          "tags": [],
+          "outline": false,
+          "rows": 1,
+          "cached": false,
+          "cacheState": "missing",
+          "proposal": false
+        }
+      ],
+      "stepSets": 0
+    }
+  ],
+  "tags": [],
+  "proposals": [],
+  "unreadableProposals": [],
+  "history": [],
+  "quality": {
+    "historyRuns": 0,
+    "suite": {
+      "features": 1,
+      "scenarios": 1,
+      "tests": 1,
+      "recorded": 0,
+      "green": 0,
+      "yellow": 0,
+      "unverified": 0,
+      "red": 0,
+      "neverRun": 1,
+      "notRun": 0
+    },
+    "trend": [],
+    "runs": [],
+    "flaky": [],
+    "healing": [],
+    "recentFailures": [],
+    "notInLastRun": [],
+    "neverRun": [
+      {
+        "feature": "features/shop.saffron",
+        "scenario": "Save"
+      }
+    ],
+    "slowest": [],
+    "tags": []
+  },
+  "vocabulary": {
+    "steps": 2,
+    "recorded": 0,
+    "unrecorded": 2,
+    "stepSets": 0,
+    "divergent": [],
+    "duplicateWordings": []
+  },
+  "data": {
+    "dir": "data",
+    "files": [],
+    "unresolved": []
+  },
+  "orphans": [],
+  "orphanScan": {
+    "complete": true,
+    "errors": [],
+    "ownershipUnknown": []
+  }
+}

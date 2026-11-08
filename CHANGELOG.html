@@ -1,3 +1,10 @@
+<h3>Unreleased</h3>
+<ul>
+  <li>A proposal with saffron-ai 1.4.0's "database check repaired after a schema change:" or "database write added by the heal:" note is marked held from Accept All, as <code>saffron accept --all</code> skips it, and the Accept All tooltip names both.</li>
+  <li>Eject to Playwright's This File choice passes a file whose name has a space as one path. It used to split in two.</li>
+  <li>Selecting a proposal no longer reads the disk or starts <code>saffron diff</code> on the UI thread.</li>
+  <li>The Dashboard tab loads the runner's page under the same Content-Security-Policy as the CI results page: only the page's own script and the plugin's opener run.</li>
+</ul>
 <h3>0.8.1</h3>
 <ul>
   <li>Export Bundle, Open Draft Pull Request and Eject to Playwright run: the commands were missing from the configuration's list, so the IDE refused them before starting. A confirmed prune never becomes the configuration the Run button repeats, so Run never deletes recordings unasked.</li>

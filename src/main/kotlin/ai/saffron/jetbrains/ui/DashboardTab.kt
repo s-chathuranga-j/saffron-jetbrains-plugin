@@ -132,10 +132,6 @@ private fun message(text: String) =
     "<html><body style=\"margin:0;padding:24px;background:#131416;color:#7E8388;font:13px system-ui,sans-serif\">" +
         StringUtil.escapeXmlEntities(text) + "</body></html>"
 
-/** The runner's page with `saffronOpen(feature, scenario)` defined before its own script runs. */
-internal fun withOpener(html: String, openJs: String): String {
-    if (openJs.isEmpty()) return html
-    val script = "<script>window.saffronOpen = function (f, s) { $openJs };</script>"
-    val head = html.indexOf("</head>")
-    return if (head < 0) script + html else html.substring(0, head) + script + html.substring(head)
-}
+/** The runner's page with `saffronOpen(feature, scenario)` defined before its own script runs, under the CI tab's nonce policy. */
+internal fun withOpener(html: String, openJs: String): String =
+    withPolicy(html, if (openJs.isEmpty()) "" else "window.saffronOpen = function (f, s) { $openJs };")

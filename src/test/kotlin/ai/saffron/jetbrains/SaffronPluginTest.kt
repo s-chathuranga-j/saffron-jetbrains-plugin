@@ -1023,8 +1023,72 @@ class SaffronPluginTest : BasePlatformTestCase() {
         assertTrue(held("""{"verified":true,"importedFrom":{"label":"github:1"}}"""))
         // One that fails a row, with no note saying so (found in review).
         assertTrue(held("""{"verified":true,"failedRows":["2"]}"""))
-        for (note in listOf("behavior change: x", "insensitive check: x", "volatile locator: x")) {
-            assertTrue(note, held("""{"verified":true,"adaptations":["$note"]}"""))
+        val notes = listOf(
+            "behavior change:", "volatile locator:", "check weakened:", "insensitive check:", "requirement not kept:", "unstable recording:", "row not proved:",
+            "write not finished:", "check changed the page:", "date not following the clock:", "data not followed:",
+            "database check repaired after a schema change:", "database write added by the heal:",
+        )
+        assertEquals(notes, ai.saffron.jetbrains.ui.HELD_NOTES)
+        for (note in notes) {
+            assertTrue(note, held("""{"verified":true,"adaptations":["$note x"]}"""))
+        }
+        // The runner's own list, when its repo sits beside this one: a note it adds fails here until copied.
+        val cache = Path.of(System.getProperty("user.dir")).resolveSibling("Saffron").resolve("src/cache")
+        if (Files.isRegularFile(cache.resolve("held.ts"))) {
+            val constants = listOf("diff.ts", "contract.ts", "proposals.ts").flatMap { f ->
+                Regex("""export const (\w+) = "([^"]*)";""").findAll(Files.readString(cache.resolve(f))).map { it.groupValues[1] to it.groupValues[2] }.toList()
+            }.toMap()
+            val runner = Regex("""prefix: (\w+),""").findAll(Files.readString(cache.resolve("held.ts"))).map { constants.getValue(it.groupValues[1]) }.toList()
+            assertEquals(runner, ai.saffron.jetbrains.ui.HELD_NOTES)
+        }
+    }
+
+    /** The Proposals tab builds `saffron diff` (disk reads, the login-shell environment, the process start) off the UI thread. */
+    fun `test a proposal's diff command is built off the UI thread`() {
+        if (SystemInfo.isWindows) return
+        val base = Path.of(project.basePath!!)
+        try {
+            standInCases(
+                base,
+                """  status) echo '{"packageInstalled":true,"proposals":[{"file":".saffron/proposals/a-saffron/b.json","feature":"features/a.saffron","scenario":"B","verified":true}]}' ;;""" +
+                    "\n  diff) echo 'the diff' ;;",
+            )
+            val tab = ProposalsTab(project, testRootDisposable)
+            val onEdt = mutableListOf<Boolean>()
+            val built = tab.diffCommand
+            tab.diffCommand = { b, f -> synchronized(onEdt) { onEdt += com.intellij.openapi.application.ApplicationManager.getApplication().isDispatchThread }; built(b, f) }
+            @Suppress("UNCHECKED_CAST")
+            val list = UIUtil.findComponentOfType(tab, CheckBoxList::class.java) as CheckBoxList<StatusProposal>
+            val details = UIUtil.findComponentOfType(tab, javax.swing.JTextArea::class.java)!!
+            PlatformTestUtil.waitWithEventsDispatching("the status never loaded", { list.itemsCount == 1 }, 60)
+            list.selectedIndex = 0
+            PlatformTestUtil.waitWithEventsDispatching("the diff never loaded", { details.text.contains("the diff") }, 60)
+            assertEquals(listOf(false), synchronized(onEdt) { onEdt.toList() })
+        } finally { base.resolve("node_modules").toFile().deleteRecursively() }
+    }
+
+    /** Eject "This File" passes the file as one path, quoted like every other: a space used to split it in two. */
+    fun `test Eject This File keeps a path with a space whole`() {
+        if (SystemInfo.isWindows) return
+        val base = Path.of(project.basePath!!)
+        val feature = base.resolve("features/order checkout.saffron")
+        TestDialogManager.setTestDialog(TestDialog.YES)
+        try {
+            standInCases(base, "")
+            Files.createDirectories(feature.parent)
+            Files.writeString(feature, "Feature: Order\n")
+            val file = com.intellij.openapi.vfs.LocalFileSystem.getInstance().refreshAndFindFileByNioFile(feature)!!
+            FileEditorManager.getInstance(project).openFile(file, true)
+            val tab = ProposalsTab(project, testRootDisposable)
+            val toolbar = UIUtil.findComponentOfType(tab.toolbar as JComponent, ActionToolbarImpl::class.java)!!
+            val eject = (toolbar.actionGroup as DefaultActionGroup).childActionsOrStubs.single { it.templateText == "Eject to Playwright" }
+            eject.actionPerformed(TestActionEvent.createTestEvent(eject))
+            val c = com.intellij.execution.RunManager.getInstance(project).allConfigurationsList.filterIsInstance<ai.saffron.jetbrains.run.SaffronRunConfiguration>().single { it.command == "eject" }
+            assertEquals(listOf("features/order checkout.saffron"), com.intellij.util.execution.ParametersListUtil.parse(c.paths))
+        } finally {
+            TestDialogManager.setTestDialog(TestDialog.DEFAULT)
+            FileEditorManager.getInstance(project).openFiles.forEach { FileEditorManager.getInstance(project).closeFile(it) }
+            listOf("node_modules", "features").forEach { base.resolve(it).toFile().deleteRecursively() }
         }
     }
 
@@ -1170,7 +1234,13 @@ class SaffronPluginTest : BasePlatformTestCase() {
         val page = "<html><head><style></style></head><body><script>use()</script></body></html>"
         val html = ai.saffron.jetbrains.ui.withOpener(page, "open(f, s)")
         assertTrue(html.indexOf("window.saffronOpen") in 0 until html.indexOf("</head>"))
-        assertEquals(page, ai.saffron.jetbrains.ui.withOpener(page, ""))
+        // The same policy as the CI results page: only the page's own scripts, each with the nonce, run.
+        val nonce = Regex("'nonce-([0-9a-f]+)'").find(html)!!.groupValues[1]
+        assertTrue(html.indexOf("Content-Security-Policy") < html.indexOf("window.saffronOpen"))
+        assertEquals(2, html.split("<script nonce=\"$nonce\">").size - 1)
+        assertEquals(html.split("<script").size - 1, html.split("<script nonce=\"$nonce\">").size - 1)
+        val bare = ai.saffron.jetbrains.ui.withOpener(page, "")
+        assertTrue(bare.contains("Content-Security-Policy") && !bare.contains("window.saffronOpen"))
     }
 
     fun `test a run row says what it left to view, from saffron runs --json`() {

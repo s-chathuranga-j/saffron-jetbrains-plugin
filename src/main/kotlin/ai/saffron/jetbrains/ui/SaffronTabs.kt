@@ -6,6 +6,7 @@ import com.intellij.icons.AllIcons
 import com.intellij.util.execution.ParametersListUtil
 import com.intellij.openapi.fileEditor.FileEditorManager
 import com.intellij.openapi.ui.Messages
+import com.intellij.execution.configurations.GeneralCommandLine
 import com.intellij.execution.process.CapturingProcessHandler
 import com.intellij.openapi.Disposable
 import com.intellij.openapi.actionSystem.ActionManager
@@ -163,18 +164,28 @@ class ProposalsTab(project: Project, parent: Disposable) : StatusTab(project, pa
     private var generation = 0
     /** `saffron diff` in flight: destroyed with the tab, and when another proposal is selected. */
     private val processes = ProcessTracker(parent)
-    /** The diff loading for the selected proposal; only touched on the EDT. */
-    private var diffLoading: CapturingProcessHandler? = null
+    /** The diff loading for the selected proposal; the field is only touched on the EDT. */
+    private var diffLoading: DiffLoad? = null
     private var diffLoadingKey: String? = null
     private var diffLoadingFor = -1
 
     private fun diffKey(p: StatusProposal) = "${p.file}|${p.createdAt}"
 
+    /** `saffron diff` for a proposal file; built off the UI thread (it reads the disk and starts a process). */
+    internal var diffCommand: (String, String) -> GeneralCommandLine = { base, file -> SaffronCommand.base(base).withParameters("diff", file) }
+
+    /** One diff load: its process is started on a pooled thread, and cancelling destroys it whenever it exists. */
+    private class DiffLoad {
+        @Volatile var handler: CapturingProcessHandler? = null
+        @Volatile var cancelled = false
+        fun cancel() { cancelled = true; handler?.destroyProcess() }
+    }
+
     init {
         toolbar = toolbar(
             action("Accept Selected", "saffron accept <ticked files>", AllIcons.Actions.Commit) { act("accept", ticked()) },
             action("Reject Selected", "saffron reject <ticked files>", AllIcons.Actions.Cancel) { act("reject", ticked()) },
-            action("Accept All", "saffron accept --all (skips proposals that are unverified, not checked, imported from CI, change what a step enters or drop a request or check it made (a requirement not kept), have a check that passes either way, a locator a later day will not find, failed a stability proof or another Examples row, a date that does not follow the clock, a data value kept as written, a check recorded again looser than the one it replaced, a write cut off by the page moving on, or a check that changed the page)", AllIcons.Actions.Checked) { acceptAll() },
+            action("Accept All", "saffron accept --all (skips proposals that are unverified, not checked, imported from CI, change what a step enters or drop a request or check it made (a requirement not kept), have a check that passes either way, a locator a later day will not find, failed a stability proof or another Examples row, a date that does not follow the clock, a data value kept as written, a check recorded again looser than the one it replaced, a write cut off by the page moving on, a check that changed the page, a database check whose query was repaired after a schema change, or a database write the heal added)", AllIcons.Actions.Checked) { acceptAll() },
             action("Accept a StepSet's Steps", "saffron accept <ticked file> --step-set <name>: file one StepSet's steps for other scenarios to reuse, the proposal left pending", AllIcons.Nodes.Folder) { acceptStepSet() },
             action("Open Draft Pull Request", "saffron export --branch <name>: push the pending proposals to a new branch and open a draft pull request", AllIcons.Vcs.Push) { exportPullRequest() },
             action("Export Bundle", "saffron export: the pending proposals, the last run's report, screenshots and traces in one bundle", AllIcons.Actions.Download) { exportBundle() },
@@ -238,7 +249,7 @@ class ProposalsTab(project: Project, parent: Disposable) : StatusTab(project, pa
         // Still loading for this very proposal (the selection fired again): let it finish.
         if (diffLoading != null && diffLoadingKey == key && diffLoadingFor == generation) return
         // Another proposal selected: the last one's diff is no longer wanted.
-        diffLoading?.destroyProcess()
+        diffLoading?.cancel()
         diffLoading = null
         diffs[key]?.let { cached ->
             details.text = describe(proposal, cached) + cached
@@ -247,17 +258,18 @@ class ProposalsTab(project: Project, parent: Disposable) : StatusTab(project, pa
         }
         val base = projectRoot.toString()
         val loadedFor = generation
-        val handler = try {
-            CapturingProcessHandler(SaffronCommand.base(base).withParameters("diff", proposal.file)).apply { setShouldDestroyProcessRecursively(true) }
-        } catch (e: Exception) {
-            details.text = describe(proposal) + "\n\n(could not load the diff: " + (e.message ?: e.toString()) + ")"
-            return
-        }
-        diffLoading = handler
+        val load = DiffLoad()
+        val command = diffCommand
+        diffLoading = load
         diffLoadingKey = key
         diffLoadingFor = loadedFor
         ApplicationManager.getApplication().executeOnPooledThread {
             val text = try {
+                // Built here, not in the selection listener: base() reads the disk and the login-shell environment, and the handler starts the process.
+                val handler = CapturingProcessHandler(command(base, proposal.file)).apply { setShouldDestroyProcessRecursively(true) }
+                load.handler = handler
+                // Cancelled before the handler existed: cancel() saw no process to destroy.
+                if (load.cancelled) handler.destroyProcess()
                 val output = processes.tracked { it.runProcess(60_000, true) }(handler)
                 if (output.exitCode == 0 && output.stdout.isNotBlank()) {
                     DIFF_HEADING + output.stdout.trim()
@@ -269,7 +281,7 @@ class ProposalsTab(project: Project, parent: Disposable) : StatusTab(project, pa
             }
             ApplicationManager.getApplication().invokeLater({
                 // Cancelled by another selection: its answer is a killed process's, never cached.
-                if (diffLoading !== handler) return@invokeLater
+                if (diffLoading !== load) return@invokeLater
                 diffLoading = null
                 // A refresh happened while this ran: the answer describes a
                 // proposal or a committed cache that may no longer exist.
@@ -345,7 +357,7 @@ class ProposalsTab(project: Project, parent: Disposable) : StatusTab(project, pa
         val rel = open?.let { runCatching { root.relativize(java.nio.file.Paths.get(it.path)).toString() }.getOrNull() }?.takeIf { !it.startsWith("..") }
         val paths = if (rel != null) {
             when (Messages.showYesNoCancelDialog(project, ask, "Eject to Playwright", "This File ($rel)", "Every Feature File", "Cancel", Messages.getQuestionIcon())) {
-                Messages.YES -> rel
+                Messages.YES -> SaffronCommand.joinPaths(listOf(rel))
                 Messages.NO -> ""
                 else -> return
             }
