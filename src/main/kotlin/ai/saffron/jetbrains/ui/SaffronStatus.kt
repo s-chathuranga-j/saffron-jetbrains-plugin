@@ -234,6 +234,8 @@ class StatusAttention(
     val evidence: List<StatusEvidence> = emptyList(),
     /** The browser it ran in, from saffron-ai 0.9.9. */
     val browser: String? = null,
+    /** Set on a red the app did not cause, from saffron-ai 1.4.0: why it did not run. */
+    val blocked: String? = null,
 )
 
 class StatusLastRun(

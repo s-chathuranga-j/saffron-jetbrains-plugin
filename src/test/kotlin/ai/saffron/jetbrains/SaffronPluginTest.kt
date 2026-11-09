@@ -26,6 +26,7 @@ import ai.saffron.jetbrains.ui.SaffronProjectScan
 import ai.saffron.jetbrains.ui.projectFile
 import ai.saffron.jetbrains.ui.CI_MAX_DOWNLOAD_KEY
 import com.google.gson.Gson
+import com.intellij.icons.AllIcons
 import com.intellij.openapi.ui.TestDialog
 import com.intellij.openapi.ui.TestDialogManager
 import com.intellij.ide.util.PropertiesComponent
@@ -208,6 +209,9 @@ class SaffronPluginTest : BasePlatformTestCase() {
             assertEquals("Run interrupted (4 not run): 2 passed · 0 pending review · 0 failed · $0.00", SaffronProjectScan.scan(root.toString()).lastRun?.summary(""))
             Files.writeString(root.resolve(".saffron/reports/latest.json"), """{"totals":{"green":2,"yellow":0,"red":1,"costUsd":0,"aiCalls":0}}""")
             assertEquals("Last run: 2 passed · 0 pending review · 1 failed · $0.00", SaffronProjectScan.scan(root.toString()).lastRun?.summary(""))
+            // A red the app did not cause is not run, as the runner's status says.
+            Files.writeString(root.resolve(".saffron/reports/latest.json"), """{"totals":{"green":2,"yellow":0,"red":2,"costUsd":0,"aiCalls":0},"scenarios":[{"status":"red","blocked":"recorder"},{"status":"red"}]}""")
+            assertEquals("Last run: 2 passed · 0 pending review · 1 failed (1 more not run) · $0.00", SaffronProjectScan.scan(root.toString()).lastRun?.summary(""))
         } finally {
             root.toFile().deleteRecursively()
         }
@@ -714,6 +718,18 @@ class SaffronPluginTest : BasePlatformTestCase() {
         assertEquals("pending review · verified", node(viewRows(view, null)[3]).detail)
     }
 
+    fun `test a last run red the run blocked reads as not run with the runner's reason`() {
+        fun attention(json: String) = Gson().fromJson(json, StatusAttention::class.java)
+        val blocked = attention("""{"feature":"features/a.saffron","scenario":"A","status":"red","blocked":"recorder"}""")
+        assertTrue(ai.saffron.jetbrains.ui.attentionNotRun(blocked))
+        assertEquals("not run · needs recording · features/a.saffron", ai.saffron.jetbrains.ui.attentionDetail(blocked))
+        // A reason this plugin does not know yet still reads as not run; an older runner sends no field.
+        assertEquals("not run · I pay", ai.saffron.jetbrains.ui.attentionDetail(attention("""{"feature":"f","scenario":"B","status":"red","blocked":"later","failedStep":"I pay"}""")))
+        val older = attention("""{"feature":"f","scenario":"C","status":"red","failedStep":"I pay"}""")
+        assertFalse(ai.saffron.jetbrains.ui.attentionNotRun(older))
+        assertEquals("I pay", ai.saffron.jetbrains.ui.attentionDetail(older))
+    }
+
     fun `test a browser matrix row says its browser and its replay opens that browser alone`() {
         val webkit = StatusAttention(feature = "features/a.saffron", scenario = "A", browser = "webkit")
         assertEquals("A · webkit", ai.saffron.jetbrains.ui.attentionLabel(webkit, matrix = true))
@@ -733,6 +749,17 @@ class SaffronPluginTest : BasePlatformTestCase() {
         )
         val labels = viewRows(matrix, null).map { node(it).label }
         assertTrue(labels.toString(), labels.containsAll(listOf("A · chromium", "A · firefox")))
+        // A red the app did not cause is not run, as the runner's results page counts it.
+        val blocked = Gson().fromJson(
+            """{"bundle":{"folder":"f"},"totals":{"green":0,"yellow":0,"red":2},"scenarios":[{"feature":"features/a.saffron","scenario":"A","status":"red","blocked":"environment"},{"feature":"features/b.saffron","scenario":"B","status":"red"}]}""",
+            RunView::class.java,
+        )
+        assertTrue(viewRows(blocked, null).map { node(it).label }.contains("1 failed (1 more not run) · 0 pending review · 0 passed"))
+        // Its row is greyed as not run with the runner's reason, never the failed icon.
+        val a = viewRows(blocked, null).map { node(it) }.first { it.label == "A" }
+        assertEquals("not run · environment missing", a.detail)
+        assertEquals(AllIcons.RunConfigurations.TestIgnored, a.icon)
+        assertEquals(AllIcons.RunConfigurations.TestFailed, viewRows(blocked, null).map { node(it) }.first { it.label == "B" }.icon)
     }
 
     fun `test a row opens the screenshot the runner picks, failure then before-heal, and nothing else`() {
@@ -756,6 +783,9 @@ class SaffronPluginTest : BasePlatformTestCase() {
         assertEquals("features/login.saffron:Login (example 1)", ai.saffron.jetbrains.ui.ciTraceSelector(example))
         val plain = Gson().fromJson("""{"feature":"features/login.saffron","scenario":"Login"}""", ai.saffron.jetbrains.ui.CiScenario::class.java)
         assertEquals("features/login.saffron:Login", ai.saffron.jetbrains.ui.ciTraceSelector(plain))
+        // A feature path the runner left out (outside the project): the trace is still found by its name.
+        val unnamed = Gson().fromJson("""{"feature":"","scenario":"Login","browser":"webkit"}""", ai.saffron.jetbrains.ui.CiScenario::class.java)
+        assertEquals("Login@webkit", ai.saffron.jetbrains.ui.ciTraceSelector(unnamed))
         // saffron trace in saffron-ai 0.9.7 rejects --max-download.
         assertEquals(listOf("trace", "--run", "7", "--provider", "github"), ai.saffron.jetbrains.ui.ciRunArgs("trace", "7", "github", 100))
         assertEquals(listOf("report", "--run", "7", "--provider", "github", "--max-download", "100"), ai.saffron.jetbrains.ui.ciRunArgs("report", "7", "github", 100))

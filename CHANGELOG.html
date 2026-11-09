@@ -1,5 +1,8 @@
 <h3>Unreleased</h3>
 <ul>
+  <li>The panel's last run line and a CI run's totals count a red the app did not cause (a stale recording without the agent, a missing environment, the agent or the budget) as not run, "2 failed (1 more not run)", as the runner's status and results page do.</li>
+  <li>In the CI Runs tab, such a red's row is shown as not run, with the runner's reason ("not run · environment missing") and the ignored-test icon, instead of as failed. The Last Run tab lists them under Not run, apart from Failed, with saffron-ai 1.4.0's <code>saffron status --json</code>, which says which red was not run; an older runner's are listed as failed, as before.</li>
+  <li>Open Trace in the CI Runs tab, and the results page's Open trace, work for a scenario whose feature path the runner left out, one outside the project: the trace is found by the scenario's name. It used to look for ":name" and find nothing.</li>
   <li>Eject to Playwright's This File choice runs in the open file's own Saffron project when it is nested in the one the tool window shows, as VS Code does: it reads that project's recordings and writes its playwright/ folder. A feature file outside every Saffron project is not offered, and the path is shown with forward slashes on Windows too.</li>
   <li>A proposal with saffron-ai 1.4.0's "database check repaired after a schema change:" or "database write added by the heal:" note is marked held from Accept All, as <code>saffron accept --all</code> skips it. The Accept All tooltips in the Proposals tab and the Files tab now give the same list, with both: the Files tab's had also left out a data value kept as written and a check recorded again looser.</li>
   <li>The Dashboard tab reloads only when the runner's page changed, so a status refresh no longer scrolls it back to the top and resets its filter.</li>
@@ -7,6 +10,7 @@
   <li>The notice for a project without the saffron-ai package says that, in a trusted project, the language server runs through <code>npx</code> until it is installed.</li>
   <li>Eject to Playwright's This File choice passes a file whose name has a space as one path. It used to split in two. A file in a folder named <code>..data</code> is offered too: only a path that leaves the project is not.</li>
   <li>Selecting a proposal no longer reads the disk or starts <code>saffron diff</code> on the UI thread.</li>
+  <li>A Run, Replay only or Headed lens reads the project folder and the installed saffron-ai version off the UI thread, so a slow disk (a WSL path, a network share) no longer freezes the IDE when it is clicked.</li>
   <li>The Dashboard tab loads the runner's page under the same Content-Security-Policy as the CI results page: only the page's own script and the plugin's opener run.</li>
 </ul>
 <h3>0.8.1</h3>

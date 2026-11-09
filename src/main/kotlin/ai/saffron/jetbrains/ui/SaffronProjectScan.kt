@@ -21,6 +21,9 @@ data class SaffronFile(val relativePath: String, val scenarios: Int, val stepSet
     override fun toString(): String = relativePath
 }
 
+/** "2 failed (1 more not run)": a red the app did not cause is not run, as the runner's status and results page say. */
+internal fun failedCount(red: Int, blocked: Int): String = "${maxOf(0, red - blocked)} failed" + if (blocked > 0) " ($blocked more not run)" else ""
+
 /** Totals of the latest run, from `.saffron/reports/latest.json`. */
 /** [costUsd] is null when the provider reports no price (Codex, Antigravity, Cursor): never a measured $0. */
 data class LastRun(
@@ -32,12 +35,14 @@ data class LastRun(
     /** Cut short (Ctrl-C, Stop): [notRun] of its scenarios did not run, neither passed nor failed. */
     val interrupted: Boolean = false,
     val notRun: Int? = null,
+    /** Reds the app did not cause (a stale recording without the agent, the environment): counted in [red], shown as not run. */
+    val blocked: Int = 0,
 ) {
     /** The panel's line: an interrupted run never reads as a finished one. */
     fun summary(ago: String): String {
         val cost = costUsd?.let { "$" + "%.2f".format(it) } ?: "cost not reported"
         val stopped = if (interrupted) "Run interrupted (${notRun ?: "some"} not run): " else "Last run: "
-        return "$stopped$green passed · $yellow pending review · $red failed · $cost$ago"
+        return "$stopped$green passed · $yellow pending review · ${failedCount(red, blocked)} · $cost$ago"
     }
 }
 
@@ -238,6 +243,7 @@ object SaffronProjectScan {
                 finishedAt = root.get("finishedAt")?.asString?.let { runCatching { Instant.parse(it) }.getOrNull() },
                 interrupted = root.get("interrupted")?.asBoolean == true,
                 notRun = root.get("notRun")?.takeIf { it.isJsonPrimitive }?.asInt,
+                blocked = root.getAsJsonArray("scenarios")?.count { s -> s.isJsonObject && s.asJsonObject.let { it.get("status")?.asString == "red" && it.get("blocked")?.isJsonPrimitive == true } } ?: 0,
             )
         }.getOrNull()
     }

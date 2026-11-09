@@ -44,6 +44,13 @@ internal fun lastRunEmptyText(status: ProjectStatus?): String {
 internal fun attentionLabel(a: StatusAttention, matrix: Boolean): String =
     if (matrix && a.browser != null) "${a.scenario} · ${a.browser}" else a.scenario
 
+/** A red the app did not cause (`blocked`, saffron-ai 1.4.0) is not run, with the runner's reason, as its status counts it. */
+internal fun attentionNotRun(a: StatusAttention): Boolean = a.status == "red" && a.blocked != null
+
+/** A row's grey text: the failed step or the feature, after "not run · <reason>" for a red that did not run. */
+internal fun attentionDetail(a: StatusAttention): String =
+    (if (attentionNotRun(a)) listOfNotNull("not run", BLOCKED_LABEL[a.blocked]) else emptyList()).plus(a.failedStep ?: a.feature).joinToString(" · ")
+
 /**
  * `feature:scenario` for `saffron trace`, so two features with a scenario of the same name
  * are told apart, and `@browser` when the row names one (saffron-ai 0.9.9 and later), so a
@@ -179,12 +186,13 @@ class LastRunTab(project: Project, parent: Disposable) : StatusTab(project, pare
         if (run != null && run.interrupted && !attention.isNullOrEmpty()) {
             root.add(DefaultMutableTreeNode(RunRow("Run interrupted", "${run.notRun ?: "some"} not run", AllIcons.Actions.Suspend)))
         }
-        for ((state, label, icon) in listOf(
-            Triple("red", "Failed", AllIcons.General.Error),
+        for ((label, icon, inGroup) in listOf<Triple<String, Icon, (StatusAttention) -> Boolean>>(
+            Triple("Failed", AllIcons.General.Error) { it.status == "red" && !attentionNotRun(it) },
+            Triple("Not run", AllIcons.RunConfigurations.TestIgnored, ::attentionNotRun),
             // Yellow is healed, a first recording or a proposal not yet verified: all pending review.
-            Triple("yellow", "Pending review", AllIcons.General.Warning),
+            Triple("Pending review", AllIcons.General.Warning) { it.status == "yellow" },
         )) {
-            val group = attention.orEmpty().filter { it.status == state }
+            val group = attention.orEmpty().filter(inGroup)
             if (group.isEmpty()) continue
             val parent = DefaultMutableTreeNode(RunRow(label, "${group.size}", AllIcons.Nodes.Folder))
             for (a in group) {
@@ -193,7 +201,7 @@ class LastRunTab(project: Project, parent: Disposable) : StatusTab(project, pare
                     DefaultMutableTreeNode(
                         RunRow(
                             attentionLabel(a, run?.browsers != null),
-                            a.failedStep ?: a.feature,
+                            attentionDetail(a),
                             if (shot != null) AllIcons.FileTypes.Image else icon,
                             attentionTooltip(a, shot != null),
                             a,

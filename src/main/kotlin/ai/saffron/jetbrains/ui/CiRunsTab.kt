@@ -138,6 +138,8 @@ class CiScenario(
     val trace: String? = null,
     /** The browser it ran in, from saffron-ai 0.9.9. */
     val browser: String? = null,
+    /** Why a red is not the app's ("recorder", "environment", ...): the run did not get to test it. */
+    val blocked: String? = null,
 )
 class CiViewProposal(val feature: String = "", val scenario: String = "", val verified: Boolean? = null, val importable: Boolean = false, val reason: String? = null)
 
@@ -274,7 +276,7 @@ internal fun viewRows(view: RunView?, problem: String?, version: String? = null,
         // A run cut short never reads as a finished one.
         val stopped = if (view.interrupted) "Run interrupted (${view.notRun ?: "some"} not run): " else ""
         rows += row(
-            "$stopped${t.red} failed · ${t.yellow} pending review · ${t.green} passed",
+            "$stopped${failedCount(t.red, view.scenarios.count { it.status == "red" && it.blocked != null })} · ${t.yellow} pending review · ${t.green} passed",
             cost,
             if (view.interrupted) AllIcons.Actions.Suspend else AllIcons.General.Information,
             if (view.interrupted) tooltipHtml("The run was interrupted: the scenarios it did not run count as neither passed nor failed.") else null,
@@ -286,11 +288,13 @@ internal fun viewRows(view: RunView?, problem: String?, version: String? = null,
             // Yellow is healed, a first recording or a proposal not yet verified: all pending review.
             val found = listOfNotNull(s.failingStep, firstError).ifEmpty { listOf(if (status == "yellow") "pending review" else "failed") }
             val proof = when (s.verified) { true -> if (s.failedRows.isNullOrEmpty()) "verified" else "FAILS A ROW"; false -> "unverified"; null -> null }
-            val detail = (found + listOfNotNull(proof)).joinToString(" · ")
+            // A red the app did not cause is not run, greyed as the runner's results page shows it.
+            val notRun = if (status == "red" && s.blocked != null) listOfNotNull("not run", BLOCKED_LABEL[s.blocked]).joinToString(" · ") else null
+            val detail = (listOfNotNull(notRun) + found.filter { notRun == null || it != "failed" } + listOfNotNull(proof)).joinToString(" · ")
             rows += row(
                 (s.displayName ?: s.scenario) + (if (view.browsers != null && s.browser != null) " · ${s.browser}" else ""),
                 detail,
-                if (status == "red") AllIcons.RunConfigurations.TestFailed else AllIcons.General.Warning,
+                if (notRun != null) AllIcons.RunConfigurations.TestIgnored else if (status == "red") AllIcons.RunConfigurations.TestFailed else AllIcons.General.Warning,
                 tooltipHtml("${s.feature} › ${s.scenario}" + (s.browser?.let { " ($it)" } ?: ""), s.failingStep, firstError, s.narrative, if (s.trace != null) "Double-click or Open Trace replays it." else null),
                 scenario = s,
             )
@@ -312,6 +316,9 @@ internal fun viewRows(view: RunView?, problem: String?, version: String? = null,
     return rows
 }
 
+/** The runner's words for why a red was not run (its results page). */
+internal val BLOCKED_LABEL = mapOf("recorder" to "needs recording", "environment" to "environment missing", "provider" to "agent unavailable", "budget" to "over the run's budget")
+
 /**
  * `<command> --run <id>` with the provider, and `--max-download` for `report`, and for
  * `trace` from saffron-ai 0.9.8 ([version]), which downloads a run no longer on disk:
@@ -326,7 +333,9 @@ internal fun ciRunArgs(command: String, runId: String, provider: String?, limitM
  * `feature:name` for `saffron trace`: the display name keeps an Examples row's "(example 1)"
  * suffix, and `@browser` (saffron-ai 0.9.9 and later) picks one browser's execution of a matrix.
  */
-internal fun ciTraceSelector(s: CiScenario): String = "${s.feature}:${s.displayName ?: s.scenario}" + (s.browser?.let { "@$it" } ?: "")
+internal fun ciTraceSelector(s: CiScenario): String =
+    // A feature path the runner left out (one outside the project): the trace is found by the name alone.
+    (if (s.feature.isEmpty()) "" else "${s.feature}:") + (s.displayName ?: s.scenario) + (s.browser?.let { "@$it" } ?: "")
 
 /** CI-controlled text as a Swing tooltip: control characters out, markup escaped, one line each. */
 internal fun tooltipHtml(vararg lines: String?): String? {
@@ -951,7 +960,7 @@ class CiRunsTab(
         val run = selectedRun() ?: return
         if (run.id != panelFor) return
         when (action) {
-            "trace" -> if (feature.isNotEmpty() && scenario.isNotEmpty()) {
+            "trace" -> if (scenario.isNotEmpty()) {
                 SaffronRunner.execute(project, "Saffron: CI replay") {
                     it.command = "trace"
                     it.paths = ciTraceSelector(CiScenario(feature = feature, scenario = scenario, displayName = scenario, browser = browserName.ifEmpty { null }))

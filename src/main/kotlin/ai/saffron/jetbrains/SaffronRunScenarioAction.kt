@@ -8,6 +8,7 @@ import com.intellij.notification.NotificationGroupManager
 import com.intellij.notification.NotificationType
 import com.intellij.openapi.actionSystem.ActionUpdateThread
 import com.intellij.openapi.actionSystem.AnActionEvent
+import com.intellij.openapi.application.ApplicationManager
 import com.intellij.openapi.fileEditor.FileDocumentManager
 import com.intellij.openapi.project.DumbAware
 import com.intellij.openapi.util.io.FileUtil
@@ -38,7 +39,7 @@ class SaffronRunScenarioAction : LSPCommandAction(), DumbAware {
     override fun commandPerformed(command: LSPCommand, e: AnActionEvent) {
         val project = e.project ?: return
         val argument = command.getArgumentAt(0, RunScenarioArgument::class.java) ?: return
-        if (argument.target.isBlank() || !File(argument.root).isDirectory) return
+        if (argument.target.isBlank()) return
         // Only inside the project the user trusted: never a folder the server placed elsewhere.
         val base = project.basePath ?: return
         if (!FileUtil.isAncestor(base, argument.root, false)) return
@@ -48,21 +49,29 @@ class SaffronRunScenarioAction : LSPCommandAction(), DumbAware {
                 .notify(project)
             return
         }
-        // The language server can be another project's saffron-ai than the one this runs.
-        if (!SaffronScenarioRun.runnerRunsScenarios(argument.root)) {
-            NotificationGroupManager.getInstance().getNotificationGroup("Saffron")
-                .createNotification(
-                    "Running one scenario needs saffron-ai 0.9.8 or later",
-                    "Run npm i -D saffron-ai@latest in ${argument.root}.",
-                    NotificationType.WARNING,
-                )
-                .notify(project)
-            return
+        // The folder and the runner's version are read from disk, which on a WSL path or a
+        // network share is slow enough to freeze the IDE: off the UI thread, then back to it.
+        ApplicationManager.getApplication().executeOnPooledThread {
+            if (!File(argument.root).isDirectory) return@executeOnPooledThread
+            // The language server can be another project's saffron-ai than the one this runs.
+            val runs = SaffronScenarioRun.runnerRunsScenarios(argument.root)
+            ApplicationManager.getApplication().invokeLater({
+                if (!runs) {
+                    NotificationGroupManager.getInstance().getNotificationGroup("Saffron")
+                        .createNotification(
+                            "Running one scenario needs saffron-ai 0.9.8 or later",
+                            "Run npm i -D saffron-ai@latest in ${argument.root}.",
+                            NotificationType.WARNING,
+                        )
+                        .notify(project)
+                    return@invokeLater
+                }
+                // The runner reads the file from disk.
+                FileDocumentManager.getInstance().saveAllDocuments()
+                val settings = SaffronScenarioRun.configuration(project, argument.root, argument.target, argument.scenario, argument.mode)
+                ProgramRunnerUtil.executeConfiguration(settings, DefaultRunExecutor.getRunExecutorInstance())
+            }, project.disposed)
         }
-        // The runner reads the file from disk.
-        FileDocumentManager.getInstance().saveAllDocuments()
-        val settings = SaffronScenarioRun.configuration(project, argument.root, argument.target, argument.scenario, argument.mode)
-        ProgramRunnerUtil.executeConfiguration(settings, DefaultRunExecutor.getRunExecutorInstance())
     }
 
     // Saving and starting a run belong on the UI thread.
