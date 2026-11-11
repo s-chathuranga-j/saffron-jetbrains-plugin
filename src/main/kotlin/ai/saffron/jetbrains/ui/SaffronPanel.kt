@@ -64,6 +64,8 @@ class SaffronPanel(private val project: Project, parent: Disposable) : SimpleToo
     private val pending = JBLabel()
     private val hint = JBLabel()
     private val refreshAlarm = Alarm(Alarm.ThreadToUse.SWING_THREAD, parent)
+    /** Disposed with the panel: work it started off the UI thread then touches it no more. */
+    private val alive = com.intellij.openapi.util.Disposer.newCheckedDisposable(parent)
     private var all: List<SaffronFile> = emptyList()
     /** The ticked files' paths, kept while the search hides them. */
     private val checked = mutableSetOf<String>()
@@ -72,6 +74,8 @@ class SaffronPanel(private val project: Project, parent: Disposable) : SimpleToo
     private var pendingFromStatus: Int? = null
     /** Of those, the ones Accept All leaves for review by file (unreadable ones too); 0 until the status loads. */
     private var heldFromStatus = 0
+    /** Files the runner's status says do not parse (an Examples table with no rows, ...): it runs none of their scenarios. */
+    private var brokenFromStatus: Set<String> = emptySet()
     private var scannedRoot: java.nio.file.Path? = null
     /** The root the files on screen were scanned for. */
     private var shownRoot: java.nio.file.Path? = null
@@ -118,6 +122,7 @@ class SaffronPanel(private val project: Project, parent: Disposable) : SimpleToo
         connection.subscribe(SaffronStatusService.TOPIC, StatusListener { load ->
             pendingFromStatus = load.status?.let { it.proposals.size + it.unreadableProposals.size }
             heldFromStatus = load.status?.let { st -> st.proposals.count { it.heldFromAcceptAll } + st.unreadableProposals.size } ?: 0
+            brokenFromStatus = load.status?.features?.filter { it.error != null }?.map { it.path }?.toSet() ?: emptySet()
             // Another project chosen, or another test folder: its files, not the last one's.
             if (service.root != scannedRoot ||
                 SaffronProjectScan.testFolderMoved(service.root, state?.featuresDir, load.status?.featuresDir)
@@ -198,7 +203,8 @@ class SaffronPanel(private val project: Project, parent: Disposable) : SimpleToo
 
     private fun openReport() {
         val html = service.root.resolve(".saffron/reports/latest.html")
-        if (java.nio.file.Files.exists(html)) BrowserUtil.browse(html.toUri()) else hint.text = "No report yet: run something first."
+        // Looked for off the UI thread: a slow disk (a WSL path, a network share) would freeze the IDE.
+        offUiThread(project, alive, { java.nio.file.Files.exists(html) }) { if (it) BrowserUtil.browse(html.toUri()) else hint.text = "No report yet: run something first." }
     }
 
     private fun acceptAll() {
@@ -206,8 +212,9 @@ class SaffronPanel(private val project: Project, parent: Disposable) : SimpleToo
     }
 
     private fun open(file: SaffronFile) {
-        val vf = LocalFileSystem.getInstance().refreshAndFindFileByNioFile(service.root.resolve(file.relativePath)) ?: return
-        OpenFileDescriptor(project, vf).navigate(true)
+        val path = service.root.resolve(file.relativePath)
+        // The refresh reads the disk: off the UI thread.
+        offUiThread(project, alive, { LocalFileSystem.getInstance().refreshAndFindFileByNioFile(path) }) { vf -> vf?.let { OpenFileDescriptor(project, it).navigate(true) } }
     }
 
     // ---------------------------------------------------------------- state
@@ -288,12 +295,7 @@ class SaffronPanel(private val project: Project, parent: Disposable) : SimpleToo
         list.clear()
         for (f in all) {
             if (q.isNotEmpty() && !f.relativePath.lowercase().contains(q)) continue
-            val label = when {
-                f.isLibrary -> "${f.relativePath}   (step sets only)"
-                f.scenarios == 1 -> "${f.relativePath}   1 scenario"
-                else -> "${f.relativePath}   ${f.scenarios} scenarios"
-            }
-            list.addItem(f, label, f.relativePath in checked)
+            list.addItem(f, fileLabel(f, f.relativePath in brokenFromStatus), f.relativePath in checked)
         }
     }
 
@@ -308,4 +310,12 @@ class SaffronPanel(private val project: Project, parent: Disposable) : SimpleToo
         }
         return " · $text"
     }
+}
+
+/** A Files row: a file the runner cannot parse runs no scenario, whatever its Scenario lines count. */
+internal fun fileLabel(f: SaffronFile, broken: Boolean): String = when {
+    broken -> "${f.relativePath}   does not parse, runs nothing"
+    f.isLibrary -> "${f.relativePath}   (step sets only)"
+    f.scenarios == 1 -> "${f.relativePath}   1 scenario"
+    else -> "${f.relativePath}   ${f.scenarios} scenarios"
 }

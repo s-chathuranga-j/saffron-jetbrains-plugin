@@ -271,12 +271,12 @@ class LastRunTab(project: Project, parent: Disposable) : StatusTab(project, pare
 
     /** The run's HTML report, in the system browser: the full story, every scenario and step. */
     private fun openReport() {
-        val report = reportHtml?.let { projectFile(projectRoot, it) }?.takeIf { java.nio.file.Files.exists(it) }
-        if (report == null) {
-            note.text = "No HTML report for the last run. Run something first."
-            return
-        }
+        val html = reportHtml
+        val root = projectRoot
         clearNote()
-        BrowserUtil.browse(report.toUri())
+        // The path is checked and the file looked for off the UI thread: both read the disk.
+        offUiThread(project, alive, { html?.let { projectFile(root, it) }?.takeIf { java.nio.file.Files.exists(it) } }) { report ->
+            if (report == null) note.text = "No HTML report for the last run. Run something first." else BrowserUtil.browse(report.toUri())
+        }
     }
 }

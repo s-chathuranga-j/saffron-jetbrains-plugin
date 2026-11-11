@@ -9,6 +9,8 @@ import com.intellij.openapi.ui.Messages
 import com.intellij.execution.configurations.GeneralCommandLine
 import com.intellij.execution.process.CapturingProcessHandler
 import com.intellij.openapi.Disposable
+import com.intellij.openapi.util.CheckedDisposable
+import com.intellij.openapi.util.Disposer
 import com.intellij.openapi.actionSystem.ActionManager
 import com.intellij.openapi.application.ApplicationManager
 import com.intellij.openapi.actionSystem.AnAction
@@ -38,6 +40,18 @@ import javax.swing.JPanel
 import javax.swing.JSplitPane
 
 /**
+ * [work] on a pooled thread (it reads the disk), then [then] with its answer on the UI thread, unless [alive]
+ * (the tab asking) or [project] was disposed meanwhile.
+ */
+internal fun <T> offUiThread(project: Project, alive: CheckedDisposable, work: () -> T, then: (T) -> Unit) {
+    val app = ApplicationManager.getApplication()
+    app.executeOnPooledThread {
+        val answer = work()
+        app.invokeLater({ then(answer) }) { alive.isDisposed || project.isDisposed }
+    }
+}
+
+/**
  * [rel] inside a trusted root of the project at [root], or null when it leads out of
  * them all (`../` or an absolute path): paths from a report, which an imported CI run
  * wrote, are never trusted. The trusted roots are the project, its test folder (which
@@ -62,6 +76,9 @@ internal fun projectFile(root: Path, rel: String): Path? {
 abstract class StatusTab(protected val project: Project, parent: Disposable) : SimpleToolWindowPanel(true, true) {
 
     protected val note = JBLabel().apply { foreground = UIUtil.getContextHelpForeground(); border = JBUI.Borders.empty(4, 8) }
+
+    /** Disposed with the tab: work it started off the UI thread then touches it no more. */
+    protected val alive: CheckedDisposable = Disposer.newCheckedDisposable(parent)
 
     init {
         project.messageBus.connect(parent).subscribe(SaffronStatusService.TOPIC, StatusListener { load -> onStatus(load) })
@@ -125,11 +142,26 @@ abstract class StatusTab(protected val project: Project, parent: Disposable) : S
      * [root] is the Saffron project the row was listed for, which may no longer be the one shown.
      */
     protected fun openScenario(features: List<StatusFeature>, feature: String, scenario: String, root: Path = projectRoot): Boolean {
-        val file = projectFile(root, feature) ?: return refused(feature)
-        val vf = LocalFileSystem.getInstance().refreshAndFindFileByNioFile(file) ?: return false
         val line = features.firstOrNull { it.path == feature }?.scenarios?.firstOrNull { it.name == scenario }?.line
-        OpenFileDescriptor(project, vf, ((line ?: 1) - 1).coerceAtLeast(0), 0).navigate(true)
+        openProjectFile(root, feature) { OpenFileDescriptor(project, it, ((line ?: 1) - 1).coerceAtLeast(0), 0).navigate(true) }
         return true
+    }
+
+    /**
+     * [rel] of the project at [root], checked by [projectFile] and found in the VFS off the UI thread (both read the
+     * disk, slow on a WSL path or a network share), then [open]ed on it; one leading out of the project is refused there.
+     */
+    protected fun openProjectFile(root: Path, rel: String, open: (com.intellij.openapi.vfs.VirtualFile) -> Unit) {
+        offUiThread(project, alive, {
+            val file = projectFile(root, rel)
+            file to file?.let { LocalFileSystem.getInstance().refreshAndFindFileByNioFile(it) }
+        }) { (file, vf) ->
+            when {
+                file == null -> refused(rel)
+                vf == null -> note.text = "Not opened: $rel is not on disk."
+                else -> open(vf)
+            }
+        }
     }
 }
 
@@ -343,17 +375,25 @@ class ProposalsTab(project: Project, parent: Disposable) : StatusTab(project, pa
 
     /** Asked first: it writes files into the project. The open feature file alone, or every one. */
     private fun eject() {
-        val ask = "Write the committed recordings as Playwright specs in the project's playwright/ folder? Files saffron eject did not write are kept."
         val open = FileEditorManager.getInstance(project).selectedFiles.firstOrNull()?.takeIf { it.extension == "saffron" || it.extension == "feature" }
         // The open file's own Saffron project, which may be nested in the one the tool window shows: eject reads its
         // recordings and config and writes its playwright/ folder, as VS Code does.
         val service = SaffronStatusService.getInstance(project)
         val shown = service.root
-        // Only a Saffron project: rootFor falls back to the IDE project, which is none when the projects are nested in
-        // it, and eject would write specs there for another tool's file (found in review).
-        val root = open?.let { ejectRoot(java.nio.file.Paths.get(it.path), project.basePath?.let { b -> java.nio.file.Paths.get(b) }, shown, service.roots) } ?: shown
-        // Forward slashes on every platform, as VS Code sends them and the runner reads them.
-        val rel = open?.let { runCatching { com.intellij.openapi.util.io.FileUtil.toSystemIndependentName(root.relativize(java.nio.file.Paths.get(it.path)).toString()) }.getOrNull() }?.takeIf { inProject(it) }
+        val roots = service.roots
+        val base = project.basePath?.let { b -> java.nio.file.Paths.get(b) }
+        // The root is found off the UI thread: it looks for saffron.config.json files on the disk.
+        offUiThread(project, alive, {
+            // Only a Saffron project: rootFor falls back to the IDE project, which is none when the projects are nested in
+            // it, and eject would write specs there for another tool's file (found in review).
+            val root = open?.let { ejectRoot(java.nio.file.Paths.get(it.path), base, shown, roots) } ?: shown
+            // Forward slashes on every platform, as VS Code sends them and the runner reads them.
+            root to open?.let { runCatching { com.intellij.openapi.util.io.FileUtil.toSystemIndependentName(root.relativize(java.nio.file.Paths.get(it.path)).toString()) }.getOrNull() }?.takeIf { inProject(it) }
+        }) { (root, rel) -> confirmEject(root, rel) }
+    }
+
+    private fun confirmEject(root: Path, rel: String?) {
+        val ask = "Write the committed recordings as Playwright specs in the project's playwright/ folder? Files saffron eject did not write are kept."
         val paths = if (rel != null) {
             when (Messages.showYesNoCancelDialog(project, ask, "Eject to Playwright", "This File ($rel)", "Every Feature File", "Cancel", Messages.getQuestionIcon())) {
                 Messages.YES -> SaffronCommand.joinPaths(listOf(rel))

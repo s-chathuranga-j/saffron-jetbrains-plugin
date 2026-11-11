@@ -210,22 +210,62 @@ object SaffronProjectScan {
         }.getOrNull() ?: mapOf("en" to listOf(listOf("Example", "Scenario"), listOf("Scenario Outline", "Scenario Template"), listOf("Examples", "Scenarios")))
     }
 
-    /** A file's `# language: fr`, a comment above everything else, as the runner's parser reads it. */
+    /**
+     * A file's `# language: fr`, a comment above everything else, as the runner's parser reads it (gherkinLanguage):
+     * the whole comment, so `# language: fr, then en` names no language. A byte order mark and a no-break space
+     * are spaces there, as JavaScript reads them.
+     */
     internal fun languageOf(lines: List<String>): String? =
-        lines.takeWhile { it.isBlank() || it.trim().startsWith("#") }
-            .firstNotNullOfOrNull { Regex("^\\s*#\\s*language\\s*:\\s*([\\w-]+)").find(it)?.groupValues?.get(1) }
+        lines.asSequence().map { it.replace('\uFEFF', ' ') }.takeWhile { it.isBlank() || it.trim().startsWith("#") }
+            .firstNotNullOfOrNull { LANGUAGE.find(it)?.groupValues?.get(1) }
 
-    /** Per line, whether it sits inside a """ or ``` doc string (fence lines included). */
+    private val LANGUAGE = Regex("(?U)^\\s*#\\s*language\\s*:\\s*([a-zA-Z\\-_]+)\\s*$")
+
+    /** Each language's step keywords as written before the step text ("Given "), from the runner's Gherkin (the VS Code extension's step-keywords.json). */
+    private val STEP_KEYWORDS: Map<String, List<String>> by lazy {
+        runCatching {
+            val text = SaffronProjectScan::class.java.getResourceAsStream("/step-keywords.json")!!.use { String(it.readAllBytes(), Charsets.UTF_8) }
+            com.google.gson.Gson().fromJson<Map<String, List<String>>>(text, object : com.google.gson.reflect.TypeToken<Map<String, List<String>>>() {}.type)
+        }.getOrNull() ?: mapOf("en" to listOf("* ", "Given ", "When ", "Then ", "And ", "But "))
+    }
+
+    private val DEFINITION = Regex("^StepSet:\\s*\\S.*$")
+    private val INVOCATION = Regex("^StepSet\\s+[^\\s:].*$")
+
+    /**
+     * Per line, whether it sits inside a """ or ``` doc string (fence lines included), as the runner's
+     * docStringLines reads one: a fence opens only right after a step in a Scenario, Background, StepSet or
+     * Fixture, so `"""Orders""" lists ...` in a description is text, not a doc string hiding every line after it.
+     */
     internal fun docstringMask(lines: List<String>): List<Boolean> {
+        val language = languageOf(lines)
+        val table = SCENARIO_KEYWORDS[language] ?: SCENARIO_KEYWORDS["en"].orEmpty()
+        val steps = STEP_KEYWORDS[language] ?: STEP_KEYWORDS["en"].orEmpty()
+        fun header(keywords: List<String>) = { line: String -> keywords.any { line.startsWith("$it:") } }
+        // scenario, outline, examples, (feature, background, rule), feature, background, rule
+        val opensBody = header(table.getOrElse(0) { emptyList() } + table.getOrElse(1) { emptyList() } + table.getOrElse(5) { listOf("Background") })
+        val closesBody = header(table.getOrElse(4) { listOf("Feature") } + table.getOrElse(6) { listOf("Rule") } + table.getOrElse(2) { emptyList() })
         var fence: String? = null
-        return lines.map { line ->
-            val marker = listOf("\"\"\"", "```").firstOrNull { line.trimStart().startsWith(it) }
-            if (marker != null && (fence == null || fence == marker)) {
-                fence = if (fence == null) marker else null
-                true
-            } else {
-                fence != null
+        var afterStep = false
+        var inBody = false
+        return lines.map { raw ->
+            val line = raw.trim()
+            val delimiter = listOf("\"\"\"", "```").firstOrNull { line.startsWith(it) }
+            if (fence != null) {
+                if (delimiter == fence) fence = null
+                return@map true
             }
+            if (delimiter != null && afterStep) {
+                fence = delimiter
+                afterStep = false
+                return@map true
+            }
+            if (line.isEmpty() || line.startsWith("#")) return@map false
+            if (opensBody(line) || DEFINITION.matches(line) || line.startsWith("Fixture:")) inBody = true
+            else if (closesBody(line)) inBody = false
+            // A table row keeps a step's context.
+            if (!line.startsWith("|")) afterStep = inBody && (steps.any { line.startsWith(it) } || INVOCATION.matches(line))
+            false
         }
     }
 

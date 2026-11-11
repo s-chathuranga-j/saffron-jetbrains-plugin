@@ -1,3 +1,12 @@
+<h3>Unreleased</h3>
+<ul>
+  <li>The Files tab marks a feature file the runner cannot parse as "does not parse, runs nothing" instead of counting its scenarios. From the saffron-ai release after 1.4.0, a Scenario Outline whose Examples table has a header row and no rows is such a file.</li>
+  <li>A <code>"""</code> or <code>```</code> in a Feature, Rule or Examples description is text, as the runner reads it: it no longer hides the scenarios below it from the Files tab's count and from right-click Run. A doc string opens only right after a step, in the file's own Gherkin language.</li>
+  <li>A <code># language:</code> comment with anything after the language names no language, as the runner's Gherkin reads it, so the file's scenarios are found by their English keywords there too.</li>
+  <li>A <code># language:</code> comment after a byte order mark, or with a no-break space in it, names its language, as the runner reads it.</li>
+  <li>Open Scenario, a Dashboard or results page scenario link, opening an orphaned recording, opening a file and Open Report in the Files and Last Run tabs, Health's Open saffron.config.json and Eject check the path and find the file off the UI thread, so a slow disk (a WSL path, a network share) no longer freezes the IDE. A scenario whose file is gone says "Not opened: ... is not on disk." instead of doing nothing.</li>
+  <li>CI Runs stops watching the git folder of a project closed while it was looking for its HEAD file.</li>
+</ul>
 <h3>0.8.2</h3>
 <ul>
   <li>The panel's last run line and a CI run's totals count a red the app did not cause (a stale recording without the agent, a missing environment, the agent or the budget) as not run, "2 failed (1 more not run)", as the runner's status and results page do.</li>

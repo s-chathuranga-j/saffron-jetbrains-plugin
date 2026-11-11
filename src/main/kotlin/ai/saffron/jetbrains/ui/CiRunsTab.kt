@@ -364,7 +364,7 @@ internal fun ago(iso: String?, now: Instant = Instant.now()): String? {
  */
 class CiRunsTab(
     project: Project,
-    parent: Disposable,
+    private val parent: Disposable,
     /** Whether the tab is on screen; tests stand in for it. Results load only for a tab someone looks at. */
     private val visible: (() -> Boolean)? = null,
     private val trusted: () -> Boolean = { SaffronCommand.trusted(project) },
@@ -420,7 +420,8 @@ class CiRunsTab(
      */
     @Volatile private var head: String? = null
     private var headFor: Path? = null
-    private var headWatch: LocalFileSystem.WatchRequest? = null
+    /** The watch on [head]'s folder, released with the tab. */
+    private var headWatch: Disposable? = null
 
     // The selected run's results as one page (saffron-ai 1.0.0): `saffron report --run <id> --panel`,
     // the page the VS Code extension shows too, below the runs. Its buttons call back through [actQuery].
@@ -506,9 +507,6 @@ class CiRunsTab(
             add(note, BorderLayout.NORTH)
             add(browser?.let { b -> JBSplitter(true, 0.45f).apply { firstComponent = runs; secondComponent = b.component } } ?: runs, BorderLayout.CENTER)
         })
-        Disposer.register(parent) {
-            headWatch?.let { LocalFileSystem.getInstance().removeWatchedRoot(it) }
-        }
         // Another branch checked out: its runs, not the last branch's.
         project.messageBus.connect(parent).subscribe(VirtualFileManager.VFS_CHANGES, object : BulkFileListener {
             override fun after(events: List<VFileEvent>) {
@@ -595,17 +593,17 @@ class CiRunsTab(
         ApplicationManager.getApplication().executeOnPooledThread {
             val said = runCatching { ExecUtil.execAndGetOutput(GeneralCommandLine("git", "rev-parse", "--git-path", "HEAD").withWorkDirectory(base.toFile()), 10_000) }.getOrNull()
             val file = said?.takeIf { it.exitCode == 0 }?.stdout?.trim()?.takeIf { it.isNotEmpty() }?.let { base.resolve(it).normalize() } ?: return@executeOnPooledThread
-            val fs = LocalFileSystem.getInstance()
-            val request = fs.addRootToWatch(file.parent.toString(), false)
+            // Released with the tab even when the project closes before the UI thread takes it below.
+            val watch = watchFolder(parent, file.parent) ?: return@executeOnPooledThread
             // Loaded into the VFS, or no change to it is ever reported.
-            fs.refreshAndFindFileByNioFile(file)
+            LocalFileSystem.getInstance().refreshAndFindFileByNioFile(file)
             ApplicationManager.getApplication().invokeLater({
-                if (headFor != base || processes.disposed) {
-                    request?.let { fs.removeWatchedRoot(it) }
+                if (headFor != base) {
+                    Disposer.dispose(watch)
                     return@invokeLater
                 }
-                headWatch?.let { fs.removeWatchedRoot(it) }
-                headWatch = request
+                headWatch?.let(Disposer::dispose)
+                headWatch = watch
                 head = FileUtil.toSystemIndependentName(file.toString())
             }, project.disposed)
         }
@@ -1007,3 +1005,16 @@ internal fun panelNeedsRunner(version: String?): String =
 private fun panelMessage(text: String) =
     "<html><body style=\"margin:0;padding:24px;background:#131416;color:#7E8388;font:13px system-ui,sans-serif\">" +
         StringUtil.escapeXmlEntities(text) + "</body></html>"
+
+/**
+ * A watch on [dir] for VFS changes, a child of [parent] so it goes with it, or null when [parent] is already gone
+ * (the watch is then released at once). Safe off the UI thread.
+ */
+internal fun watchFolder(parent: Disposable, dir: Path): Disposable? {
+    val fs = LocalFileSystem.getInstance()
+    val request = fs.addRootToWatch(dir.toString(), false) ?: return null
+    val watch = Disposable { fs.removeWatchedRoot(request) }
+    if (Disposer.tryRegister(parent, watch)) return watch
+    fs.removeWatchedRoot(request)
+    return null
+}

@@ -115,7 +115,10 @@ class HealthTab(project: Project, parent: Disposable) : StatusTab(project, paren
     private fun node(row: Row): DefaultMutableTreeNode = DefaultMutableTreeNode(row)
 
     private fun openConfig() {
-        val vf = LocalFileSystem.getInstance().refreshAndFindFileByNioFile(projectRoot.resolve("saffron.config.json"))
-        if (vf != null) OpenFileDescriptor(project, vf).navigate(true) else note.text = "No saffron.config.json yet: run npx saffron init."
+        val config = projectRoot.resolve("saffron.config.json")
+        // The refresh reads the disk: off the UI thread.
+        offUiThread(project, alive, { LocalFileSystem.getInstance().refreshAndFindFileByNioFile(config) }) { vf ->
+            if (vf != null) OpenFileDescriptor(project, vf).navigate(true) else note.text = "No saffron.config.json yet: run npx saffron init."
+        }
     }
 }

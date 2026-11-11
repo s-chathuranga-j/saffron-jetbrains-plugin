@@ -6,7 +6,6 @@ import com.intellij.openapi.Disposable
 import com.intellij.openapi.fileEditor.OpenFileDescriptor
 import com.intellij.openapi.project.Project
 import com.intellij.openapi.ui.Messages
-import com.intellij.openapi.vfs.LocalFileSystem
 import com.intellij.ui.ColoredTreeCellRenderer
 import com.intellij.ui.DoubleClickListener
 import com.intellij.ui.SimpleTextAttributes
@@ -152,8 +151,7 @@ class OrphansTab(project: Project, parent: Disposable) : StatusTab(project, pare
     private fun openSelected(): Boolean {
         val row = (tree.lastSelectedPathComponent as? DefaultMutableTreeNode)?.userObject as? OrphanRow ?: return false
         val file = row.file ?: return false
-        val vf = LocalFileSystem.getInstance().refreshAndFindFileByNioFile(projectFile(projectRoot, file) ?: return refused(file)) ?: return false
-        OpenFileDescriptor(project, vf).navigate(true)
+        openProjectFile(projectRoot, file) { OpenFileDescriptor(project, it).navigate(true) }
         return true
     }
 

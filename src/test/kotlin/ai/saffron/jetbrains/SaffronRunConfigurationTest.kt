@@ -314,6 +314,38 @@ class SaffronRunConfigurationTest : BasePlatformTestCase() {
         assertEquals(1 to 1, SaffronProjectScan.count(quoted))
     }
 
+    fun `test a fence in a description is text, as the runner's docStringLines reads it`() {
+        // A Feature's description quoting a name: the runner opens no doc string there, so both scenarios count and run.
+        val described = listOf("Feature: Orders", "  \"\"\"Orders\"\"\" lists every order", "  Scenario: A", "    Given x", "  Scenario: B", "    Given y")
+        assertEquals(2 to 0, SaffronProjectScan.count(described))
+        assertEquals("B" to 5, SaffronScenarioRun.scenarioAt(described.joinToString("\n"), 5))
+        // An Examples description too; a doc string after a StepSet invocation still hides its text.
+        val outline = listOf("Feature: F", "  Scenario Outline: O", "    Given <a>", "    Examples:", "      ```notes```", "      | a |", "      | 1 |", "  Scenario: After", "    StepSet Login", "      \"\"\"", "      Scenario: Quoted", "      \"\"\"")
+        assertEquals(2 to 0, SaffronProjectScan.count(outline))
+        assertEquals("After" to 8, SaffronScenarioRun.scenarioAt(outline.joinToString("\n"), 10))
+        // In the file's own language: an Italian step opens one.
+        val italian = listOf("# language: it", "Funzionalità: F", "  Scenario: Primo", "    Dato x", "      \"\"\"", "      Scenario: Quoted", "      \"\"\"")
+        assertEquals(1 to 0, SaffronProjectScan.count(italian))
+    }
+
+    fun `test the language comment is read whole, as Gherkin reads it`() {
+        assertEquals("fr", SaffronProjectScan.languageOf(listOf("# language: fr  ")))
+        assertEquals("en-pirate", SaffronProjectScan.languageOf(listOf("#language:en-pirate")))
+        // A byte order mark and a no-break space are spaces, as the runner's JavaScript reads them.
+        assertEquals("fr", SaffronProjectScan.languageOf(listOf("\uFEFF# language: fr", "Fonctionnalité: F")))
+        assertEquals("fr", SaffronProjectScan.languageOf(listOf("# language: fr\u00A0")))
+        // Anything after the language makes it no language comment: English, as the runner parses it.
+        assertNull(SaffronProjectScan.languageOf(listOf("# language: it, then en")))
+        assertEquals(1 to 0, SaffronProjectScan.count(listOf("# language: it, then en", "Feature: F", "  Scenario: A", "  Schema dello scenario: B")))
+    }
+
+    fun `test a file the runner cannot parse is listed as running nothing`() {
+        val outline = ai.saffron.jetbrains.ui.SaffronFile("features/a.saffron", 1, 0)
+        assertEquals("features/a.saffron   1 scenario", ai.saffron.jetbrains.ui.fileLabel(outline, false))
+        // An outline whose Examples have a header and no rows: saffron-ai refuses the file, so it runs no scenario.
+        assertEquals("features/a.saffron   does not parse, runs nothing", ai.saffron.jetbrains.ui.fileLabel(outline, true))
+    }
+
     fun `test a Run lens works while the IDE indexes`() {
         assertTrue(ActionManager.getInstance().getAction("saffron.runScenario") is com.intellij.openapi.project.DumbAware)
     }

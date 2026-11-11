@@ -1,6 +1,7 @@
 package ai.saffron.jetbrains
 
 import ai.saffron.jetbrains.ui.OrphansTab
+import ai.saffron.jetbrains.ui.offUiThread
 import ai.saffron.jetbrains.ui.CiRunsTab
 import ai.saffron.jetbrains.ui.LastRunTab
 import ai.saffron.jetbrains.ui.RunNode
@@ -1139,7 +1140,11 @@ class SaffronPluginTest : BasePlatformTestCase() {
             val toolbar = UIUtil.findComponentOfType(tab.toolbar as JComponent, ActionToolbarImpl::class.java)!!
             val eject = (toolbar.actionGroup as DefaultActionGroup).childActionsOrStubs.single { it.templateText == "Eject to Playwright" }
             eject.actionPerformed(TestActionEvent.createTestEvent(eject))
-            val c = com.intellij.execution.RunManager.getInstance(project).allConfigurationsList.filterIsInstance<ai.saffron.jetbrains.run.SaffronRunConfiguration>().single { it.command == "eject" }
+            fun ejects() = com.intellij.execution.RunManager.getInstance(project).allConfigurationsList.filterIsInstance<ai.saffron.jetbrains.run.SaffronRunConfiguration>().filter { it.command == "eject" }
+            // The file's Saffron project is found off the UI thread: nothing is asked or run before that.
+            assertEquals(0, ejects().size)
+            PlatformTestUtil.waitWithEventsDispatching("eject never ran", { ejects().size == 1 }, 30)
+            val c = ejects().single()
             assertEquals(listOf("features/order checkout.saffron"), com.intellij.util.execution.ParametersListUtil.parse(c.paths))
         } finally {
             TestDialogManager.setTestDialog(TestDialog.DEFAULT)
@@ -1373,10 +1378,166 @@ class SaffronPluginTest : BasePlatformTestCase() {
             val tab = LastRunTab(project, testRootDisposable)
             val tree = UIUtil.findComponentOfType(tab, Tree::class.java)!!
             fun groups() = (tree.model.root as DefaultMutableTreeNode).children().toList().map { it.toString() }
-            PlatformTestUtil.waitWithEventsDispatching("the status never loaded", { groups().isNotEmpty() }, 60)
-            assertEquals(listOf("Pending review"), groups())
+            // This status, not the one an earlier test left in the project's status service, which the tab shows first.
+            PlatformTestUtil.waitWithEventsDispatching("the status never loaded: ${'$'}{groups()}", { groups() == listOf("Pending review") }, 60)
         } finally {
             base.resolve("node_modules").toFile().deleteRecursively()
+        }
+    }
+
+    fun `test work off the UI thread never comes back to a tab disposed meanwhile`() {
+        val gate = java.util.concurrent.CountDownLatch(1)
+        val returned = java.util.concurrent.CountDownLatch(2)
+        val gone = Disposer.newCheckedDisposable()
+        val open = Disposer.newCheckedDisposable(testRootDisposable)
+        val came = mutableListOf<String>()
+        offUiThread(project, gone, { gate.await(); returned.countDown(); "gone" }) { came += it }
+        offUiThread(project, open, { gate.await(); returned.countDown(); "open" }) { came += it }
+        Disposer.dispose(gone)
+        gate.countDown()
+        assertTrue(returned.await(10, java.util.concurrent.TimeUnit.SECONDS))
+        PlatformTestUtil.waitWithEventsDispatching("the open tab's answer never came", { "open" in came }, 10)
+        // The work that returned before the open tab's answer arrived queued its own by then: give it the same time.
+        repeat(5) { PlatformTestUtil.dispatchAllInvocationEventsInIdeEventQueue(); Thread.sleep(20) }
+        assertEquals(listOf("open"), came)
+    }
+
+    fun `test Last Run checks and opens a scenario's file off the UI thread`() {
+        if (SystemInfo.isWindows) return
+        val base = Path.of(project.basePath!!)
+        try {
+            Files.createDirectories(base.resolve("features"))
+            Files.writeString(base.resolve("features/a.saffron"), "Feature: A\n  Scenario: First\n    Given x\n")
+            val row = { feature: String, name: String -> """{"feature":"$feature","scenario":"$name","baseScenario":"$name","status":"red","evidence":[]}""" }
+            standInCases(
+                base,
+                """  *) echo '{"packageInstalled":true,"features":[{"path":"features/a.saffron","scenarios":[{"name":"First","line":2}]}],"lastRun":{"totals":{"scenarios":3,"red":3},"attention":[${row("../outside.saffron", "Away")},${row("features/gone.saffron", "Gone")},${row("features/a.saffron", "First")}]}}' ;;""",
+            )
+            val tab = LastRunTab(project, testRootDisposable)
+            val tree = UIUtil.findComponentOfType(tab, Tree::class.java)!!
+            fun rows() = (tree.model.root as DefaultMutableTreeNode).depthFirstEnumeration().toList().map { it as DefaultMutableTreeNode }.filter { it.level == 2 }
+            PlatformTestUtil.waitWithEventsDispatching("the status never loaded", { rows().size == 3 }, 60)
+            val toolbar = UIUtil.findComponentOfType(tab.toolbar as JComponent, ActionToolbarImpl::class.java)!!
+            val open = (toolbar.actionGroup as DefaultActionGroup).childActionsOrStubs.single { it.templateText == "Open Scenario" }
+            val note = UIUtil.findComponentOfType(tab, JBLabel::class.java)!!
+            tree.selectionPath = TreePath(rows().single { it.toString() == "Away" }.path)
+            open.actionPerformed(TestActionEvent.createTestEvent(open))
+            // Nothing read on the UI thread: the refusal comes once the check ran in the background.
+            assertEquals("", note.text)
+            PlatformTestUtil.waitWithEventsDispatching("never refused", { note.text.isNotEmpty() }, 30)
+            assertEquals("Not opened: ../outside.saffron is outside the project.", note.text)
+            // A file no longer on disk says so, instead of nothing happening.
+            tree.selectionPath = TreePath(rows().single { it.toString() == "Gone" }.path)
+            open.actionPerformed(TestActionEvent.createTestEvent(open))
+            PlatformTestUtil.waitWithEventsDispatching("the missing file was never named", { note.text == "Not opened: features/gone.saffron is not on disk." }, 30)
+            tree.selectionPath = TreePath(rows().single { it.toString() == "First" }.path)
+            open.actionPerformed(TestActionEvent.createTestEvent(open))
+            val editors = FileEditorManager.getInstance(project)
+            PlatformTestUtil.waitWithEventsDispatching("the scenario never opened", { editors.selectedTextEditor != null }, 30)
+            assertEquals("a.saffron", editors.openFiles.single().name)
+            assertEquals(1, editors.selectedTextEditor!!.caretModel.logicalPosition.line)
+            editors.closeFile(editors.openFiles.single())
+        } finally {
+            base.resolve("features").toFile().deleteRecursively()
+            base.resolve("node_modules").toFile().deleteRecursively()
+        }
+    }
+
+    fun `test the Files tab says which file the runner cannot parse`() {
+        if (SystemInfo.isWindows) return
+        val base = Path.of(project.basePath!!)
+        try {
+            // saffron-ai refuses an outline whose Examples have a header and no rows: the file runs nothing.
+            standInCases(base, """  status) echo '{"packageInstalled":true,"features":[{"path":"features/a.saffron","error":"features/a.saffron:4 the Examples of \"O\" have a header row and no rows"}]}' ;;""")
+            Files.createDirectories(base.resolve("features"))
+            Files.writeString(base.resolve("saffron.config.json"), "{}")
+            Files.writeString(base.resolve("features/a.saffron"), "Feature: A\n  Scenario Outline: O\n    Given <x>\n    Examples:\n      | x |\n")
+            Files.writeString(base.resolve("features/b.saffron"), "Feature: B\n  Scenario: S\n")
+            SaffronStatusService.getInstance(project).discoverRoots()
+            val panel = ai.saffron.jetbrains.ui.SaffronPanel(project, testRootDisposable)
+            val list = UIUtil.findComponentOfType(panel, CheckBoxList::class.java)!!
+            fun labels() = (0 until list.itemsCount).map { (list.model.getElementAt(it) as javax.swing.JCheckBox).text }
+            PlatformTestUtil.waitWithEventsDispatching(
+                "the broken file was never marked",
+                { labels() == listOf("features/a.saffron   does not parse, runs nothing", "features/b.saffron   1 scenario") },
+                60,
+            )
+        } finally {
+            Files.deleteIfExists(base.resolve("saffron.config.json"))
+            base.resolve("features").toFile().deleteRecursively()
+            base.resolve("node_modules").toFile().deleteRecursively()
+        }
+    }
+
+    fun `test the Files tab opens a file and looks for its report off the UI thread`() {
+        if (SystemInfo.isWindows) return
+        val base = Path.of(project.basePath!!)
+        try {
+            standInCases(base, "")
+            Files.createDirectories(base.resolve("features"))
+            Files.writeString(base.resolve("saffron.config.json"), "{}")
+            Files.writeString(base.resolve("features/b.saffron"), "Feature: B\n  Scenario: S\n")
+            SaffronStatusService.getInstance(project).discoverRoots()
+            val panel = ai.saffron.jetbrains.ui.SaffronPanel(project, testRootDisposable)
+            val list = UIUtil.findComponentOfType(panel, CheckBoxList::class.java)!!
+            PlatformTestUtil.waitWithEventsDispatching("never listed", { list.itemsCount == 1 }, 60)
+            val toolbar = UIUtil.findComponentOfType(panel.toolbar as JComponent, ActionToolbarImpl::class.java)!!
+            val report = (toolbar.actionGroup as DefaultActionGroup).childActionsOrStubs.single { it.templateText == "Open Report" }
+            fun said() = UIUtil.findComponentsOfType(panel, JBLabel::class.java).any { it.text == "No report yet: run something first." }
+            report.actionPerformed(TestActionEvent.createTestEvent(report))
+            assertFalse(said())
+            PlatformTestUtil.waitWithEventsDispatching("no report was never said", ::said, 30)
+            // A double click opens the file once the VFS found it in the background.
+            val editors = FileEditorManager.getInstance(project)
+            list.dispatchEvent(java.awt.event.MouseEvent(list, java.awt.event.MouseEvent.MOUSE_CLICKED, 0, 0, 1, 1, 2, false))
+            assertEquals(0, editors.openFiles.size)
+            PlatformTestUtil.waitWithEventsDispatching("the file never opened", { editors.openFiles.any { it.name == "b.saffron" } }, 30)
+            editors.openFiles.forEach { editors.closeFile(it) }
+        } finally {
+            Files.deleteIfExists(base.resolve("saffron.config.json"))
+            base.resolve("features").toFile().deleteRecursively()
+            base.resolve("node_modules").toFile().deleteRecursively()
+        }
+    }
+
+    fun `test Health looks for its config file off the UI thread`() {
+        if (SystemInfo.isWindows) return
+        val base = Path.of(project.basePath!!)
+        try {
+            standInCases(base, "")
+            val tab = ai.saffron.jetbrains.ui.HealthTab(project, testRootDisposable)
+            val toolbar = UIUtil.findComponentOfType(tab.toolbar as JComponent, ActionToolbarImpl::class.java)!!
+            val config = (toolbar.actionGroup as DefaultActionGroup).childActionsOrStubs.single { it.templateText == "Open saffron.config.json" }
+            val note = UIUtil.findComponentOfType(tab, JBLabel::class.java)!!
+            val missing = "No saffron.config.json yet: run npx saffron init."
+            config.actionPerformed(TestActionEvent.createTestEvent(config))
+            assertFalse(note.text == missing)
+            PlatformTestUtil.waitWithEventsDispatching("the missing config was never said", { note.text == missing }, 30)
+            Files.writeString(base.resolve("saffron.config.json"), "{}")
+            config.actionPerformed(TestActionEvent.createTestEvent(config))
+            val editors = FileEditorManager.getInstance(project)
+            PlatformTestUtil.waitWithEventsDispatching("the config never opened", { editors.openFiles.any { it.name == "saffron.config.json" } }, 30)
+            editors.openFiles.forEach { editors.closeFile(it) }
+        } finally {
+            Files.deleteIfExists(base.resolve("saffron.config.json"))
+            base.resolve("node_modules").toFile().deleteRecursively()
+        }
+    }
+
+    /** The watch on git's HEAD folder used to be released only on the UI thread, a step a closing project skips. */
+    fun `test the CI Runs HEAD watch goes with the tab, even before the UI thread takes it`() {
+        val dir = Files.createTempDirectory("saffron-head")
+        try {
+            val tab = com.intellij.openapi.util.Disposer.newDisposable()
+            val watch = ai.saffron.jetbrains.ui.watchFolder(tab, dir)!!
+            var released = false
+            com.intellij.openapi.util.Disposer.register(watch) { released = true }
+            com.intellij.openapi.util.Disposer.dispose(tab)
+            assertTrue(released)
+            // A tab already gone keeps no watch.
+            assertNull(ai.saffron.jetbrains.ui.watchFolder(tab, dir))
+        } finally {
+            dir.toFile().deleteRecursively()
         }
     }
 

@@ -111,15 +111,11 @@ object SaffronScenarioRun {
         // The file's own language too (Funktionalität, Grundlage, Regel): an English-only list ran the Rule before's last scenario.
         // A .saffron StepSet or Fixture is no scenario either: the runner refuses a line in one (src/parser/filter.ts).
         val others = SaffronProjectScan.blockKeywords(lines) + listOf("StepSet", "Fixture")
-        var fence: String? = null
+        // Doc strings as the runner reads them: a fence in a description is text (scenarioHeaders, docStringLines).
+        val literal = SaffronProjectScan.docstringMask(lines)
         for (i in 0..last) {
+            if (literal.getOrElse(i) { false }) continue
             val trimmed = lines.getOrElse(i) { "" }.trim()
-            val marker = listOf("\"\"\"", "```").firstOrNull { trimmed.startsWith(it) }
-            if (marker != null) {
-                if (fence == null) fence = marker else if (fence == marker) fence = null
-                continue
-            }
-            if (fence != null) continue
             val keyword = keywords.firstOrNull { trimmed.startsWith("$it:") }
             if (keyword != null) found += i to trimmed.substring(keyword.length + 1).trim()
             else if (others.any { trimmed.startsWith("$it:") }) found += i to null
