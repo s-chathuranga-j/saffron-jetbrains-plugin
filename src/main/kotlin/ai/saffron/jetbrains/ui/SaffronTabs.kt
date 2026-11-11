@@ -62,7 +62,12 @@ internal fun <T> offUiThread(project: Project, alive: CheckedDisposable, work: (
  */
 internal fun projectFile(root: Path, rel: String): Path? {
     val base = root.toAbsolutePath().normalize()
-    val full = runCatching { base.resolve(rel).normalize() }.getOrNull()?.takeIf { rel.isNotEmpty() } ?: return null
+    // A report from a CI machine on Windows names "features\login.saffron": read with forward slashes where no
+    // file has that name, as the runner reads it.
+    val slashed = rel.replace('\\', '/')
+    val full = runCatching { base.resolve(rel).normalize() }.getOrNull()?.takeIf { rel.isNotEmpty() }
+        ?.let { p -> if (slashed != rel && !java.nio.file.Files.exists(p)) runCatching { base.resolve(slashed).normalize() }.getOrNull() ?: p else p }
+        ?: return null
     val features = SaffronProjectScan.featuresDir(base)
     val trusted = listOf(base, features, base.resolve(".saffron"))
     // The real path, through its nearest existing folder for a file not written yet.
@@ -142,7 +147,8 @@ abstract class StatusTab(protected val project: Project, parent: Disposable) : S
      * [root] is the Saffron project the row was listed for, which may no longer be the one shown.
      */
     protected fun openScenario(features: List<StatusFeature>, feature: String, scenario: String, root: Path = projectRoot): Boolean {
-        val line = features.firstOrNull { it.path == feature }?.scenarios?.firstOrNull { it.name == scenario }?.line
+        // The status lists paths with forward slashes; a report written on Windows names them with backslashes.
+        val line = features.firstOrNull { it.path == feature || it.path == feature.replace('\\', '/') }?.scenarios?.firstOrNull { it.name == scenario }?.line
         openProjectFile(root, feature) { OpenFileDescriptor(project, it, ((line ?: 1) - 1).coerceAtLeast(0), 0).navigate(true) }
         return true
     }
@@ -257,7 +263,7 @@ class ProposalsTab(project: Project, parent: Disposable) : StatusTab(project, pa
             }
             val state = (if (p.stale != null) "STALE · $verified" else "${p.mode} · $verified") + (p.importedFrom?.let { " · ${it.label}" } ?: "") +
                 (if (p.heldFromAcceptAll) " · held from Accept All" else "")
-            list.addItem(p, "${p.feature.substringAfterLast('/')} › ${p.scenario}   $state", p.target in ticked)
+            list.addItem(p, "${p.feature.replace('\\', '/').substringAfterLast('/')} › ${p.scenario}   $state", p.target in ticked)
         }
         if (items.isEmpty()) details.text = ""
     }

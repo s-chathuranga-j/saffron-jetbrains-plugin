@@ -1,6 +1,13 @@
-<h3>Unreleased</h3>
+<h3>0.8.3</h3>
 <ul>
-  <li>The Files tab marks a feature file the runner cannot parse as "does not parse, runs nothing" instead of counting its scenarios. From the saffron-ai release after 1.4.0, a Scenario Outline whose Examples table has a header row and no rows is such a file.</li>
+  <li>The editor marks what saffron-ai 1.4.1 refuses a file for, through its language server: an Examples table with a header row and no rows, Examples with no table, a header Gherkin does not know (<code>scenario:</code>, <code>Scenario :</code>) with steps under it, and a step above a scenario's first step that Gherkin reads as description (a tab after its keyword). Before, only the Files tab said the file does not parse.</li>
+  <li>The CI Runs results page runs none of the scripts in the page a run's bundle carries: the plugin's own script handles its buttons. A script a bundle carried in could otherwise have started an import, a trace or a report without a click.</li>
+  <li>A row of a report written on Windows (<code>features\login.saffron</code>, imported from a CI run) opens its scenario at its line on macOS and Linux, and proposal and CI rows show the file's name alone.</li>
+  <li>A feature file that is not valid UTF-8 is listed with its scenarios, as the runner runs it, instead of with 0 scenarios.</li>
+  <li>Run Selected on one file names its run configuration by the file's path: two files of one name in two folders no longer share a configuration, where Rerun in the first one's Run tab ran the second.</li>
+  <li>The Files tab notices files added, removed or renamed in a test folder outside the project (<code>"features": "../e2e"</code>) without a Refresh.</li>
+  <li>In CI Runs, a selected scenario row stays selected when the list reloads, so Open Trace still acts on it.</li>
+  <li>The Files tab marks a feature file the runner cannot parse as "does not parse, runs nothing" instead of counting its scenarios. From saffron-ai 1.4.1, a Scenario Outline whose Examples table has a header row and no rows is such a file.</li>
   <li>A <code>"""</code> or <code>```</code> in a Feature, Rule or Examples description is text, as the runner reads it: it no longer hides the scenarios below it from the Files tab's count and from right-click Run. A doc string opens only right after a step, in the file's own Gherkin language.</li>
   <li>A <code># language:</code> comment with anything after the language names no language, as the runner's Gherkin reads it, so the file's scenarios are found by their English keywords there too.</li>
   <li>A <code># language:</code> comment after a byte order mark, or with a no-break space in it, names its language, as the runner reads it.</li>

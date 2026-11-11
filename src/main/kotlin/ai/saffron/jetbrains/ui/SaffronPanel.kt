@@ -103,8 +103,11 @@ class SaffronPanel(private val project: Project, parent: Disposable) : SimpleToo
         connection.subscribe(VirtualFileManager.VFS_CHANGES, object : BulkFileListener {
             override fun after(events: List<VFileEvent>) {
                 val root = FileUtil.toSystemIndependentName(service.root.toString()).trimEnd('/') + "/"
+                // The test folder too, which may sit outside the project ("features": "../e2e"): a file added there
+                // was not listed until Refresh (found in review).
+                val features = state?.featuresDir?.let { FileUtil.toSystemIndependentName(it.toString()).trimEnd('/') + "/" }
                 if (events.any { e ->
-                        e.path.startsWith(root) &&
+                        (e.path.startsWith(root) || (features != null && e.path.startsWith(features))) &&
                             // The config's `features` decides which folder is listed.
                             // A nested project's config too, and a folder deleted, moved or renamed that may hold one (found in review).
                             (e.path.endsWith("/saffron.config.json") || ((e is VFileDeleteEvent || e is VFileMoveEvent || e is VFilePropertyChangeEvent) && e.file?.isDirectory == true) || e.path.endsWith(".saffron") || e.path.endsWith(".feature") || e.path.contains("/.saffron/")) &&
@@ -195,7 +198,9 @@ class SaffronPanel(private val project: Project, parent: Disposable) : SimpleToo
             return
         }
         val paths = SaffronCommand.joinPaths(selected.map { it.relativePath })
-        val name = if (selected.size == 1) "Run ${selected[0].relativePath.substringAfterLast('/')}" else "Saffron: run ${selected.size} files"
+        // Named by its path: login.saffron in two folders shared one temporary configuration, and Rerun in the
+        // first one's Run tab ran the second (found in review).
+        val name = if (selected.size == 1) "Run ${selected[0].relativePath}" else "Saffron: run ${selected.size} files"
         SaffronRunner.execute(project, name) {
             it.command = "run"; it.paths = paths; it.tags = ""; it.replayOnly = replayOnly.isSelected; it.headed = headed.isSelected
         }

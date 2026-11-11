@@ -118,6 +118,17 @@ class SaffronPluginTest : BasePlatformTestCase() {
     fun `test a path from a report or CI run opens only inside the project`() {
         val root = java.nio.file.Path.of("/work/shop")
         assertEquals(root.resolve("features/login.saffron"), projectFile(root, "features/login.saffron"))
+        // A report written on Windows names the file with backslashes: read with forward slashes, as the runner reads it.
+        if (java.io.File.separatorChar == '/') {
+            val real = java.nio.file.Files.createTempDirectory("saffron-windows-report").toRealPath()
+            try {
+                java.nio.file.Files.createDirectories(real.resolve("features"))
+                java.nio.file.Files.writeString(real.resolve("features/login.saffron"), "Feature: F\n")
+                assertEquals(real.resolve("features/login.saffron"), projectFile(real, "features\\login.saffron"))
+            } finally {
+                real.toFile().deleteRecursively()
+            }
+        }
         assertEquals(root.resolve("features/login.saffron"), projectFile(root, "features/../features/./login.saffron"))
         assertEquals(root.resolve("..x/a.saffron"), projectFile(root, "..x/a.saffron"))
         for (outside in listOf("../shop-other/a.saffron", "features/../../a.saffron", "..", "/etc/passwd", "", ".", "a\u0000b")) {
@@ -1362,9 +1373,16 @@ class SaffronPluginTest : BasePlatformTestCase() {
         assertTrue(html.indexOf("Content-Security-Policy") < html.indexOf("<title>"))
         val bare = ai.saffron.jetbrains.ui.withActions(page, "")
         assertTrue(bare.contains("Content-Security-Policy") && !bare.contains("window.saffronAct"))
-        // Only the page's own scripts run: each carries the policy's nonce.
+        // The page is a downloaded bundle's text: only the plugin's script carries the policy's nonce, and it does
+        // what the page's own did. A script a bundle carried in runs no more than the page's own.
         val nonce = Regex("'nonce-([0-9a-f]+)'").find(html)!!.groupValues[1]
-        assertEquals(html.split("<script").size - 1, html.split("<script nonce=\"$nonce\">").size - 1)
+        assertEquals(1, html.split("<script nonce=\"$nonce\">").size - 1)
+        assertTrue(html.contains("<script>use()</script>"))
+        assertTrue(html.substringBefore("</head>").contains("closest(\"[data-act]\")"))
+        val hostile = ai.saffron.jetbrains.ui.withActions("<html><head></head><body><div>name <script>window.saffronAct('import')</script></div></body></html>", "act(a, f, s, b)")
+        assertTrue(hostile.contains("<script>window.saffronAct('import')</script>"))
+        // A page this checkout's runner wrote (the dashboard) keeps its scripts.
+        assertFalse(ai.saffron.jetbrains.ui.withPolicy(page, "open()").contains("<script>use()"))
         assertEquals(listOf("trace", "features/a.saffron", "Sign in\nwith a newline", "firefox"), ai.saffron.jetbrains.ui.parseAction("[\"trace\",\"features/a.saffron\",\"Sign in\\nwith a newline\",\"firefox\"]"))
         assertEquals(listOf("import", "", "", ""), ai.saffron.jetbrains.ui.parseAction("[\"import\"]"))
         assertEquals(listOf("", "", "", ""), ai.saffron.jetbrains.ui.parseAction("not json"))

@@ -172,7 +172,9 @@ object SaffronProjectScan {
     internal fun isLink(attrs: BasicFileAttributes): Boolean = attrs.isSymbolicLink || (attrs.isDirectory && attrs.isOther)
 
     private fun describe(base: Path, file: Path): SaffronFile {
-        val lines = runCatching { Files.readAllLines(file) }.getOrDefault(emptyList())
+        // Bytes that are not UTF-8 read as replacement characters, as the runner reads them: readAllLines threw on
+        // one, and a Latin-1 file the runner runs was listed with 0 scenarios (found in review).
+        val lines = runCatching { String(Files.readAllBytes(file), Charsets.UTF_8).lines() }.getOrDefault(emptyList())
         val (scenarios, sets) = count(lines)
         return SaffronFile(base.relativize(file).toString().replace('\\', '/'), scenarios, sets)
     }

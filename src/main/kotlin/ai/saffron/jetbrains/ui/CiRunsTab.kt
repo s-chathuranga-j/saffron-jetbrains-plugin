@@ -75,22 +75,32 @@ class CiResults(val kind: String = "", val sizeBytes: Long? = null, val label: S
 /** What a run left to view, in the runner's own words (`results.label`); a running run says so already. */
 internal fun resultsWords(results: CiResults?): String? = results?.takeIf { it.kind != "running" }?.label
 
+/** What the results page's own script does, run as the plugin's: the buttons shown, and a click on one handed to saffronAct. */
+private const val PANEL_SCRIPT = "document.addEventListener(\"DOMContentLoaded\", function () { document.body.classList.add(\"linked\"); }); " +
+    "document.addEventListener(\"click\", function (e) { var el = e.target.closest && e.target.closest(\"[data-act]\"); " +
+    "if (el) window.saffronAct(el.getAttribute(\"data-act\"), el.getAttribute(\"data-f\") || undefined, el.getAttribute(\"data-s\") || undefined, el.getAttribute(\"data-b\") || undefined); });"
+
 /**
- * The runner's results page under a CSP, first in its head (its own scripts, by a
- * nonce; inline styles, embedded screenshots, the report's fonts; nothing else loads),
- * with `saffronAct(action, feature, scenario, browser)` defined before its own script
- * runs when [actJs] wires one. Any other script, however it got into the page, is refused.
+ * The runner's results page under a CSP, first in its head (inline styles, embedded
+ * screenshots, the report's fonts; nothing else loads), with
+ * `saffronAct(action, feature, scenario, browser)` and the page's click handling run as
+ * the plugin's own script when [actJs] wires one. The page is a downloaded bundle's
+ * text, so none of its own scripts run: a script a bundle carried in could otherwise
+ * start an import, a trace or a report without a click (found in review).
  */
 internal fun withActions(html: String, actJs: String): String =
-    withPolicy(html, if (actJs.isEmpty()) "" else "window.saffronAct = function (a, f, s, b) { $actJs };")
+    withPolicy(html, if (actJs.isEmpty()) "" else "window.saffronAct = function (a, f, s, b) { $actJs }; $PANEL_SCRIPT", pageScripts = false)
 
-/** A runner page under a nonce Content-Security-Policy: only its own scripts, and [js] (defined first), run. */
-internal fun withPolicy(html: String, js: String): String {
+/**
+ * A runner page under a nonce Content-Security-Policy: [js] (defined first) runs, and the
+ * page's own scripts only with [pageScripts] (a page this checkout's runner wrote).
+ */
+internal fun withPolicy(html: String, js: String, pageScripts: Boolean = true): String {
     val nonce = java.util.UUID.randomUUID().toString().replace("-", "")
     val csp = "<meta http-equiv=\"Content-Security-Policy\" content=\"default-src 'none'; script-src 'nonce-$nonce'; " +
         "style-src 'unsafe-inline' https://fonts.googleapis.com; font-src https://fonts.gstatic.com; img-src data:;\">"
     val script = if (js.isEmpty()) "" else "<script nonce=\"$nonce\">$js</script>"
-    val page = html.replace("<script>", "<script nonce=\"$nonce\">")
+    val page = if (pageScripts) html.replace("<script>", "<script nonce=\"$nonce\">") else html
     val head = page.indexOf("<head>")
     return if (head < 0) csp + script + page else page.substring(0, head + 6) + csp + script + page.substring(head + 6)
 }
@@ -304,7 +314,7 @@ internal fun viewRows(view: RunView?, problem: String?, version: String? = null,
         val n = view.proposals.size
         val node = row("$n proposal${if (n == 1) "" else "s"}: ${view.proposals.count { it.importable }} importable", "Import Run files them here", AllIcons.Vcs.Patch)
         for (p in view.proposals) {
-            val name = "${p.feature.substringAfterLast('/')} › ${p.scenario}"
+            val name = "${p.feature.replace('\\', '/').substringAfterLast('/')} › ${p.scenario}"
             node.add(
                 if (p.importable) row(name, "importable", AllIcons.Actions.Checked)
                 else row(name, "not importable: ${p.reason ?: "no reason given"}", AllIcons.General.Error, tooltipHtml(p.reason)),
@@ -616,6 +626,9 @@ class CiRunsTab(
     private fun rebuild() {
         val runs = listed ?: return
         val selected = selectedRun()?.id
+        // The row selected under the run (a failed scenario, for Open Trace), by its labels: found again after the
+        // reload. Every status reload moved the selection up to the run (found in review).
+        val below = tree.selectionPath?.path?.drop(2)?.map { it.toString() } ?: emptyList()
         // Plain JTree calls: which runs were open, so a reload keeps them open.
         val expanded = (0 until root.childCount).map { root.getChildAt(it) as DefaultMutableTreeNode }
             .filter { tree.isExpanded(TreePath(it.path)) }
@@ -671,7 +684,13 @@ class CiRunsTab(
                 val child = root.getChildAt(i) as DefaultMutableTreeNode
                 val id = (child.userObject as? RunNode)?.run?.id ?: continue
                 if (id in expanded) tree.expandPath(TreePath(child.path))
-                if (id == selected) tree.selectionPath = TreePath(child.path)
+                if (id == selected) {
+                    var at = child
+                    for (label in below) {
+                        at = (0 until at.childCount).map { at.getChildAt(it) as DefaultMutableTreeNode }.firstOrNull { it.toString() == label } ?: break
+                    }
+                    tree.selectionPath = TreePath(at.path)
+                }
             }
         } finally {
             rebuilding = false
@@ -685,7 +704,7 @@ class CiRunsTab(
         result.error?.let { return listOf(DefaultMutableTreeNode(RunNode(it, "", AllIcons.General.Error, tooltipHtml(it)))) }
         val rows = result.warnings.map { DefaultMutableTreeNode(RunNode(it, "", AllIcons.General.Warning, tooltipHtml(it))) }.toMutableList()
         for (p in result.proposals) {
-            val name = if (p.feature.isNotEmpty()) "${p.feature.substringAfterLast('/')} › ${p.scenario}" else p.file
+            val name = if (p.feature.isNotEmpty()) "${p.feature.replace('\\', '/').substringAfterLast('/')} › ${p.scenario}" else p.file
             rows += when (p.outcome) {
                 "imported" -> DefaultMutableTreeNode(RunNode(name, "imported: review it in Proposals", AllIcons.Actions.Checked))
                 "unchanged" -> DefaultMutableTreeNode(RunNode(name, p.reason ?: "already pending here", AllIcons.General.Information))
