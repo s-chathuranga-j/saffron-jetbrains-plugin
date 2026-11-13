@@ -627,8 +627,12 @@ class CiRunsTab(
         val runs = listed ?: return
         val selected = selectedRun()?.id
         // The row selected under the run (a failed scenario, for Open Trace), by its labels: found again after the
-        // reload. Every status reload moved the selection up to the run (found in review).
-        val below = tree.selectionPath?.path?.drop(2)?.map { it.toString() } ?: emptyList()
+        // reload. Every status reload moved the selection up to the run (found in review). With which of the rows so
+        // labelled it is: two features' "Sign in" are told apart, where the first was selected again (found in review).
+        val below = tree.selectionPath?.path?.drop(2)?.map { n ->
+            val siblings = (n as DefaultMutableTreeNode).parent.let { p -> (0 until p.childCount).map(p::getChildAt) }
+            n.toString() to siblings.filter { it.toString() == n.toString() }.indexOf(n)
+        } ?: emptyList()
         // Plain JTree calls: which runs were open, so a reload keeps them open.
         val expanded = (0 until root.childCount).map { root.getChildAt(it) as DefaultMutableTreeNode }
             .filter { tree.isExpanded(TreePath(it.path)) }
@@ -686,8 +690,8 @@ class CiRunsTab(
                 if (id in expanded) tree.expandPath(TreePath(child.path))
                 if (id == selected) {
                     var at = child
-                    for (label in below) {
-                        at = (0 until at.childCount).map { at.getChildAt(it) as DefaultMutableTreeNode }.firstOrNull { it.toString() == label } ?: break
+                    for ((label, nth) in below) {
+                        at = (0 until at.childCount).map { at.getChildAt(it) as DefaultMutableTreeNode }.filter { it.toString() == label }.getOrNull(nth) ?: break
                     }
                     tree.selectionPath = TreePath(at.path)
                 }

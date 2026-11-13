@@ -23,6 +23,7 @@ import javax.swing.JPanel
 import javax.swing.JTree
 import javax.swing.tree.DefaultMutableTreeNode
 import javax.swing.tree.DefaultTreeModel
+import javax.swing.tree.TreePath
 
 /** What opening a row's screenshot comes to: the file to show, or why there is none. */
 internal class Screenshot(val file: VirtualFile? = null, val problem: String? = null)
@@ -174,6 +175,9 @@ class LastRunTab(project: Project, parent: Disposable) : StatusTab(project, pare
     }
 
     override fun render(status: ProjectStatus?) {
+        // The row selected, found again below by its scenario, never by a name another feature's row shares: the reload
+        // dropped it, and Open Replay then replayed every traced scenario (found in review).
+        val was = selected()?.let(::attentionTraceSelector)
         root.removeAllChildren()
         features = status?.features ?: emptyList()
         val run = status?.lastRun
@@ -213,6 +217,7 @@ class LastRunTab(project: Project, parent: Disposable) : StatusTab(project, pare
         }
         model.reload()
         TreeUtil.expandAll(tree)
+        was?.let { w -> TreeUtil.findNode(root) { (it.userObject as? RunRow)?.attention?.let(::attentionTraceSelector) == w } }?.let { tree.selectionPath = TreePath(it.path) }
     }
 
     private fun selected(): StatusAttention? =

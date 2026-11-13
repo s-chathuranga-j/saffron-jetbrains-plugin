@@ -21,7 +21,7 @@ import java.nio.file.Path
 /**
  * Right-click a `.saffron` or `.feature` file (project view or editor) or a folder holding
  * them and the context menu offers "Run 'login.saffron'": a run
- * configuration is created for that target, the way JUnit and Cypress do it.
+ * configuration is created for that target, the way JUnit does it.
  * In the editor with the caret in a scenario it is "Run 'Successful login'",
  * that scenario alone, as a Run lens runs it (no LSP4IJ needed).
  */

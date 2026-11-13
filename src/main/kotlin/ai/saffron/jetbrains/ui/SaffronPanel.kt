@@ -23,6 +23,8 @@ import com.intellij.openapi.util.io.FileUtil
 import com.intellij.openapi.vfs.LocalFileSystem
 import com.intellij.openapi.vfs.newvfs.BulkFileListener
 import com.intellij.openapi.vfs.newvfs.events.VFileEvent
+import com.intellij.openapi.vfs.newvfs.events.VFileCopyEvent
+import com.intellij.openapi.vfs.newvfs.events.VFileCreateEvent
 import com.intellij.openapi.vfs.newvfs.events.VFileDeleteEvent
 import com.intellij.openapi.vfs.newvfs.events.VFileMoveEvent
 import com.intellij.openapi.vfs.newvfs.events.VFilePropertyChangeEvent
@@ -110,7 +112,8 @@ class SaffronPanel(private val project: Project, parent: Disposable) : SimpleToo
                         (e.path.startsWith(root) || (features != null && e.path.startsWith(features))) &&
                             // The config's `features` decides which folder is listed.
                             // A nested project's config too, and a folder deleted, moved or renamed that may hold one (found in review).
-                            (e.path.endsWith("/saffron.config.json") || ((e is VFileDeleteEvent || e is VFileMoveEvent || e is VFilePropertyChangeEvent) && e.file?.isDirectory == true) || e.path.endsWith(".saffron") || e.path.endsWith(".feature") || e.path.contains("/.saffron/")) &&
+                            // A folder created or copied in too: the VFS reports a new folder alone, never the feature files in it (found in review).
+                            (e.path.endsWith("/saffron.config.json") || ((e is VFileDeleteEvent || e is VFileMoveEvent || e is VFilePropertyChangeEvent || e is VFileCopyEvent) && e.file?.isDirectory == true) || (e is VFileCreateEvent && e.isDirectory) || e.path.endsWith(".saffron") || e.path.endsWith(".feature") || e.path.contains("/.saffron/")) &&
                             // An import's download, there for a moment: the import's own writes reload.
                             !e.path.contains("/.saffron/reports/run-download-")
                     }

@@ -176,8 +176,16 @@ object SaffronProjectScan {
         // one, and a Latin-1 file the runner runs was listed with 0 scenarios (found in review).
         val lines = runCatching { String(Files.readAllBytes(file), Charsets.UTF_8).lines() }.getOrDefault(emptyList())
         val (scenarios, sets) = count(lines)
-        return SaffronFile(base.relativize(file).toString().replace('\\', '/'), scenarios, sets)
+        return SaffronFile(relativeName(base, file), scenarios, sets)
     }
+
+    /**
+     * [file] relative to [base], or its own path where there is no relative one (a test folder on
+     * another Windows drive, or a junction to one), as the runner's path.relative gives it. relativize
+     * threw there, and the Files tab listed nothing (found in review).
+     */
+    internal fun relativeName(base: Path, file: Path): String =
+        runCatching { base.relativize(file).toString() }.getOrElse { file.toString() }.replace('\\', '/')
 
     /** Scenarios (in the file's Gherkin language) and step sets of a file's [lines], doc strings left out. */
     internal fun count(lines: List<String>): Pair<Int, Int> {

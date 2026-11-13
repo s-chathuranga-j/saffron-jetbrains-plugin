@@ -312,6 +312,14 @@ class SaffronPluginTest : BasePlatformTestCase() {
         assertFalse(SaffronProjectScan.isLink(attrs(directory = false, other = true)))
     }
 
+    fun `test a feature file with no path relative to the project is listed by its own path`() {
+        val base = java.nio.file.Paths.get("/project")
+        assertEquals("features/a.feature", SaffronProjectScan.relativeName(base, base.resolve("features/a.feature")))
+        // Windows paths on two drives have no relative path, and relativize throws, as it does here for a path
+        // that is not absolute like the project: the file keeps its own path, as the runner's path.relative gives it.
+        assertEquals("e2e/b.feature", SaffronProjectScan.relativeName(base, java.nio.file.Paths.get("e2e", "b.feature")))
+    }
+
     fun `test a Last Run screenshot opens only while it is the picture that run took`() {
         val shots = Files.createTempDirectory("saffron-shots").toFile()
         val root = Files.createTempDirectory("saffron-copies").toFile()
@@ -603,7 +611,7 @@ class SaffronPluginTest : BasePlatformTestCase() {
         return (0 until tree.model.getChildCount(tree.model.root)).map { tree.model.getChild(tree.model.root, it) as DefaultMutableTreeNode }
     }
 
-    private fun press(tab: CiRunsTab, name: String) {
+    private fun press(tab: com.intellij.openapi.ui.SimpleToolWindowPanel, name: String) {
         val toolbar = UIUtil.findComponentOfType(tab.toolbar as JComponent, ActionToolbarImpl::class.java)!!
         val action = (toolbar.actionGroup as DefaultActionGroup).childActionsOrStubs.single { it.templateText == name }
         action.actionPerformed(TestActionEvent.createTestEvent(action))
@@ -1335,7 +1343,8 @@ class SaffronPluginTest : BasePlatformTestCase() {
         for (tip in listOf(ai.saffron.jetbrains.ui.PROPOSALS_ACCEPT_ALL_TIP, ai.saffron.jetbrains.ui.FILES_ACCEPT_ALL_TIP)) {
             assertTrue(tip, tip.contains(ai.saffron.jetbrains.ui.ACCEPT_ALL_SKIPS))
             assertTrue(tip, tip.contains("a database check whose query was repaired after a schema change"))
-            assertTrue(tip, tip.contains("a database write the heal added"))
+            // saffron-ai 1.4.1 holds a recording, first or made again, whose step now writes to the database, under the heal's note.
+            assertTrue(tip, tip.contains("a database write that a heal or a new recording added"))
         }
     }
 
@@ -1648,5 +1657,153 @@ class SaffronPluginTest : BasePlatformTestCase() {
         assertEquals(text, ai.saffron.jetbrains.ui.editsBeside(edits, "\n\n(could not load the diff: boom)"))
         // An older runner lists none: nothing is added.
         assertEquals("", ai.saffron.jetbrains.ui.featureEditText(Gson().fromJson("""{"file":"p.json"}""", StatusProposal::class.java).featureEdits))
+    }
+
+    /** A folder of feature files copied in or brought by a pull: the VFS reports the folder alone, never its files. */
+    fun `test the Files tab lists a folder of feature files added to the test folder`() {
+        if (SystemInfo.isWindows) return
+        val base = Path.of(project.basePath!!)
+        try {
+            standInCases(base, "")
+            Files.createDirectories(base.resolve("features"))
+            Files.writeString(base.resolve("saffron.config.json"), "{}")
+            Files.writeString(base.resolve("features/a.saffron"), "Feature: A\n")
+            SaffronStatusService.getInstance(project).discoverRoots()
+            // The VFS knows the test folder and its files, as an IDE that has shown them does.
+            val features = com.intellij.openapi.vfs.LocalFileSystem.getInstance().refreshAndFindFileByNioFile(base.resolve("features"))!!
+            VfsUtil.markDirtyAndRefresh(false, true, true, features)
+            val panel = ai.saffron.jetbrains.ui.SaffronPanel(project, testRootDisposable)
+            @Suppress("UNCHECKED_CAST")
+            val list = UIUtil.findComponentOfType(panel, CheckBoxList::class.java) as CheckBoxList<ai.saffron.jetbrains.ui.SaffronFile>
+            PlatformTestUtil.waitWithEventsDispatching("the files never loaded", { list.itemsCount == 1 }, 60)
+            Files.createDirectories(base.resolve("features/checkout"))
+            Files.writeString(base.resolve("features/checkout/b.saffron"), "Feature: B\n")
+            VfsUtil.markDirtyAndRefresh(false, true, true, features)
+            PlatformTestUtil.waitWithEventsDispatching("the new folder's file was never listed", { list.itemsCount == 2 }, 20)
+        } finally {
+            Files.deleteIfExists(base.resolve("saffron.config.json"))
+            base.resolve("features").toFile().deleteRecursively()
+            base.resolve("node_modules").toFile().deleteRecursively()
+        }
+    }
+
+    /** Selecting is reading: a status reload kept the ticks but dropped the proposal on screen and its diff. */
+    fun `test a status reload keeps the proposal being read, unless a later run replaced it`() {
+        if (SystemInfo.isWindows) return
+        val base = Path.of(project.basePath!!)
+        val made = listOf(base.resolve("node_modules"), base.resolve(".saffron"))
+        try {
+            val status = base.resolve(".saffron/status.json")
+            Files.createDirectories(status.parent)
+            fun listed(revision: String) = Files.writeString(
+                status,
+                """{"packageInstalled":true,"proposals":[{"file":".saffron/proposals/login-saffron/sign-in.json",""" +
+                    """"feature":"features/login.saffron","scenario":"Sign in","narrative":"the button moved","revision":"$revision"}]}""",
+            )
+            listed("a".repeat(64))
+            val bin = base.resolve("node_modules/.bin/saffron")
+            Files.createDirectories(bin.parent)
+            Files.writeString(bin, "#!/bin/sh\ncat '$status'\n")
+            bin.toFile().setExecutable(true)
+            val tab = ProposalsTab(project, testRootDisposable)
+            @Suppress("UNCHECKED_CAST")
+            val list = UIUtil.findComponentOfType(tab, CheckBoxList::class.java) as CheckBoxList<StatusProposal>
+            val details = UIUtil.findComponentOfType(tab, javax.swing.JTextArea::class.java)!!
+            fun row() = if (list.itemsCount == 1) list.getItemAt(0) else null
+            PlatformTestUtil.waitWithEventsDispatching("the status never loaded", { row()?.revision == "a".repeat(64) }, 60)
+            val first = row()!!
+            list.selectedIndex = 0
+            assertTrue(details.text, details.text.contains("the button moved"))
+            SaffronStatusService.getInstance(project).refresh()
+            PlatformTestUtil.waitWithEventsDispatching("the status never reloaded", { row().let { it != null && it !== first } }, 60)
+            assertEquals(0, list.selectedIndex)
+            assertTrue(details.text, details.text.contains("the button moved"))
+            // A run files a new proposal under the same name: never shown as the one being read.
+            listed("b".repeat(64))
+            SaffronStatusService.getInstance(project).refresh()
+            PlatformTestUtil.waitWithEventsDispatching("the replacement never loaded", { row()?.revision == "b".repeat(64) }, 60)
+            assertEquals(-1, list.selectedIndex)
+            assertEquals("", details.text)
+        } finally {
+            made.forEach { it.toFile().deleteRecursively() }
+        }
+    }
+
+    /**
+     * No status, no claim: while it could not load, Remove All said every recording belongs to a scenario, and the
+     * Proposals and Tags tabs said nothing was pending and the files had no tags.
+     */
+    fun `test the tabs claim nothing about the project while the status is unavailable`() {
+        if (SystemInfo.isWindows) return
+        val base = Path.of(project.basePath!!)
+        try {
+            standInCases(base, """  status) echo '{"packageInstalled":true,"features":[],"orphans":[]}' ;;""")
+            val tab = OrphansTab(project, testRootDisposable)
+            val proposals = ProposalsTab(project, testRootDisposable)
+            val tags = ai.saffron.jetbrains.ui.TagsTab(project, testRootDisposable)
+            val tree = UIUtil.findComponentOfType(tab, Tree::class.java)!!
+            val note = UIUtil.findComponentOfType(tab, com.intellij.ui.components.JBLabel::class.java)!!
+            fun empty(panel: JComponent) = UIUtil.findComponentOfType(panel, CheckBoxList::class.java)!!.emptyText.text
+            PlatformTestUtil.waitWithEventsDispatching("never loaded", { tree.emptyText.text == "Every recording belongs to a scenario" }, 60)
+            assertEquals("No proposals pending review", empty(proposals))
+            assertEquals("No @tags in the feature files", empty(tags))
+            standInCases(base, """  status) echo 'saffron.config.json is not valid JSON' >&2; exit 1 ;;""")
+            SaffronStatusService.getInstance(project).refresh()
+            PlatformTestUtil.waitWithEventsDispatching("the failure never showed", { note.text.startsWith("Status unavailable") }, 60)
+            assertEquals("Loading…", tree.emptyText.text)
+            assertEquals("Loading…", empty(proposals))
+            assertEquals("Loading…", empty(tags))
+            press(tab, "Remove All")
+            assertEquals("Orphaned recordings are unknown until the status loads", note.text)
+        } finally { Files.deleteIfExists(base.resolve("node_modules/.bin/saffron")) }
+    }
+
+    /** A reload dropped the selected row: Open Replay then replayed every traced scenario, not the one selected. */
+    fun `test Last Run keeps the selected scenario through a status reload, told apart from one of the same name`() {
+        if (SystemInfo.isWindows) return
+        val base = Path.of(project.basePath!!)
+        try {
+            val row = { feature: String -> """{"feature":"$feature","scenario":"Sign in","baseScenario":"Sign in","status":"red","evidence":[]}""" }
+            standInCases(base, """  *) echo '{"packageInstalled":true,"lastRun":{"totals":{"red":2},"attention":[${row("features/a.saffron")},${row("features/b.saffron")}]}}' ;;""")
+            val tab = LastRunTab(project, testRootDisposable)
+            val tree = UIUtil.findComponentOfType(tab, Tree::class.java)!!
+            fun rows() = (tree.model.root as DefaultMutableTreeNode).depthFirstEnumeration().toList().map { it as DefaultMutableTreeNode }.filter { it.level == 2 }
+            PlatformTestUtil.waitWithEventsDispatching("the status never loaded", { rows().size == 2 }, 60)
+            val picked = rows()[1]
+            tree.selectionPath = TreePath(picked.path)
+            SaffronStatusService.getInstance(project).refresh()
+            PlatformTestUtil.waitWithEventsDispatching("the status never reloaded", { rows().size == 2 && rows()[1] !== picked }, 60)
+            assertSame(rows()[1], tree.lastSelectedPathComponent)
+        } finally { base.resolve("node_modules").toFile().deleteRecursively() }
+    }
+
+    /** Two features' "Sign in" in one CI run: a reload put the selection back on the first, and Open Trace replayed it. */
+    fun `test CI Runs keeps the selected scenario through a status reload, told apart from one of the same name`() {
+        if (SystemInfo.isWindows) return
+        val base = Path.of(project.basePath!!)
+        val dir = Files.createTempDirectory("saffron-same-name")
+        val results = dir.resolve("results.json")
+        val red = { feature: String -> """{"feature":"$feature","scenario":"Sign in","status":"red","trace":".saffron/ci/github-7/attempt-1/t.zip"}""" }
+        Files.writeString(results, """{"bundle":{"folder":".saffron/ci/github-7/attempt-1"},"totals":{"red":2},"scenarios":[${red("features/a.saffron")},${red("features/b.saffron")}]}""")
+        System.setProperty("intellij.progress.task.ignoreHeadless", "true")
+        try {
+            val runs = """echo '{"provider":"github","runs":[{"id":"7","name":"e2e","number":"7","status":"completed","conclusion":"failure"}]}'"""
+            standInCases(base, "  runs) $runs ;;\n  report) cat '$results' ;;")
+            val tab = CiRunsTab(project, testRootDisposable, visible = { true })
+            val tree = UIUtil.findComponentOfType(tab, Tree::class.java)!!
+            PlatformTestUtil.waitWithEventsDispatching("never listed", { runRows(tab).map { it.toString() } == listOf("e2e #7") }, 60)
+            tree.selectionPath = TreePath(runRows(tab)[0].path)
+            fun scenarios() = (0 until runRows(tab)[0].childCount).map { runRows(tab)[0].getChildAt(it) as DefaultMutableTreeNode }.filter { node(it).scenario != null }
+            PlatformTestUtil.waitWithEventsDispatching("the results never loaded", { scenarios().size == 2 }, 60)
+            val picked = scenarios()[1]
+            tree.selectionPath = TreePath(picked.path)
+            SaffronStatusService.getInstance(project).refresh()
+            PlatformTestUtil.waitWithEventsDispatching("the status never reloaded", { scenarios().size == 2 && scenarios()[1] !== picked }, 60)
+            assertEquals("features/b.saffron", ((tree.lastSelectedPathComponent as DefaultMutableTreeNode).userObject as RunNode).scenario?.feature)
+        } finally {
+            System.clearProperty("intellij.progress.task.ignoreHeadless")
+            base.resolve("node_modules").toFile().deleteRecursively()
+            dir.toFile().deleteRecursively()
+        }
     }
 }

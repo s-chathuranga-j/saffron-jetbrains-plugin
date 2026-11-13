@@ -223,7 +223,6 @@ class ProposalsTab(project: Project, parent: Disposable) : StatusTab(project, pa
             action("Eject to Playwright", "saffron eject: write the committed recordings as Playwright specs in the project", AllIcons.Actions.Execute) { eject() },
             action("Refresh", "Reload the status", AllIcons.Actions.Refresh) { refreshStatus() },
         )
-        list.setEmptyText("No proposals pending review")
         list.addListSelectionListener {
             val i = list.selectedIndex
             val selected = if (i >= 0) list.getItemAt(i) else null
@@ -249,7 +248,11 @@ class ProposalsTab(project: Project, parent: Disposable) : StatusTab(project, pa
         // A tick stays with the proposal that was ticked: one a later run filed
         // under the same name comes back unticked, unseen.
         val ticked = ticked().map { it.target }.toSet()
+        // So does the selection, the proposal being read: a reload emptied the details pane (found in review).
+        val reading = list.selectedIndex.takeIf { it >= 0 }?.let { list.getItemAt(it)?.target }
         items = status?.proposals ?: emptyList()
+        // No status (loading, or unavailable) says nothing about what is pending (found in review).
+        list.setEmptyText(if (status == null) "Loading…" else "No proposals pending review")
         // The committed cache a diff was computed against may have changed
         // too (an accept, a pull), so a refresh invalidates every diff.
         generation++
@@ -266,6 +269,7 @@ class ProposalsTab(project: Project, parent: Disposable) : StatusTab(project, pa
             list.addItem(p, "${p.feature.replace('\\', '/').substringAfterLast('/')} › ${p.scenario}   $state", p.target in ticked)
         }
         if (items.isEmpty()) details.text = ""
+        items.indexOfFirst { it.target == reading }.takeIf { it >= 0 }?.let { list.selectedIndex = it }
     }
 
     private fun ticked(): List<StatusProposal> = items.filter { list.isItemSelected(it) }
@@ -468,7 +472,6 @@ class TagsTab(project: Project, parent: Disposable) : StatusTab(project, parent)
             action("Run Tagged", "saffron run --filter <ticked tags> (any of them; the CLI also takes \"@a and not @b\")", AllIcons.Actions.Execute) { run() },
             action("Refresh", "Reload the status", AllIcons.Actions.Refresh) { refreshStatus() },
         )
-        list.setEmptyText("No @tags in the feature files")
         val options = JPanel().apply {
             layout = BoxLayout(this, BoxLayout.X_AXIS)
             border = JBUI.Borders.empty(4, 6)
@@ -486,6 +489,8 @@ class TagsTab(project: Project, parent: Disposable) : StatusTab(project, parent)
     override fun render(status: ProjectStatus?) {
         val ticked = items.filter { list.isItemSelected(it) }.map { it.tag }.toSet()
         items = status?.tags ?: emptyList()
+        // No status (loading, or unavailable) says nothing about the files' tags.
+        list.setEmptyText(if (status == null) "Loading…" else "No @tags in the feature files")
         list.clear()
         for (t in items) list.addItem(t, "${t.tag}   ${t.scenarios} scenario${if (t.scenarios == 1) "" else "s"}", t.tag in ticked)
     }

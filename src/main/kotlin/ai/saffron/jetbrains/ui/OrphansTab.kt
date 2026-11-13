@@ -81,6 +81,10 @@ class OrphansTab(project: Project, parent: Disposable) : StatusTab(project, pare
         count = 0
         unknown = null
         if (status == null) {
+            // Loading, or unavailable: nothing is known, so nothing is claimed and Remove All refuses. It said every
+            // recording belongs to a scenario while the status could not load (found in review).
+            unknown = "Orphaned recordings are unknown until the status loads"
+            tree.emptyText.text = "Loading…"
             model.reload()
             return
         }
