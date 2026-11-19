@@ -72,7 +72,7 @@ class HealthTab(project: Project, parent: Disposable) : StatusTab(project, paren
                 "Divergent steps",
                 if (v.divergent.isEmpty()) "none" else "${v.divergent.size} · same text, different recordings",
                 if (v.divergent.isEmpty()) AllIcons.General.InspectionsOK else AllIcons.General.Warning,
-                "A step recorded differently in two caches. Replay uses the newest; re-record or accept a rename edit to converge.",
+                "A step recorded differently in two scenarios. Each scenario replays its own recording.",
             ),
         )
         for (d in v.divergent) divergent.add(node(Row(d, "", AllIcons.Nodes.Variable)))
