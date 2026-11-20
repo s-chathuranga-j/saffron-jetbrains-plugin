@@ -224,6 +224,17 @@ class SaffronPluginTest : BasePlatformTestCase() {
             // A red the app did not cause is not run, as the runner's status says.
             Files.writeString(root.resolve(".saffron/reports/latest.json"), """{"totals":{"green":2,"yellow":0,"red":2,"costUsd":0,"aiCalls":0},"scenarios":[{"status":"red","blocked":"recorder"},{"status":"red"}]}""")
             assertEquals("Last run: 2 passed · 0 pending review · 1 failed (1 more not run) · $0.00", SaffronProjectScan.scan(root.toString()).lastRun?.summary(""))
+            // Every scenario passed and the teardown failed: the runner exits 2, so the line says so.
+            Files.writeString(root.resolve(".saffron/reports/latest.json"), """{"startedAt":"s1","totals":{"green":2,"yellow":0,"red":0,"costUsd":0,"aiCalls":0},"hooks":[{"phase":"setup","exitCode":0},{"phase":"teardown","exitCode":1}]}""")
+            assertEquals("Last run: 2 passed · 0 pending review · 0 failed · $0.00 · teardown failed", SaffronProjectScan.scan(root.toString()).lastRun?.summary(""))
+            assertTrue(ai.saffron.jetbrains.ui.teardownFailedFor(root, "s1"))
+            // Another run's report says nothing about the status's run.
+            assertFalse(ai.saffron.jetbrains.ui.teardownFailedFor(root, "s2"))
+            // A teardown cut off with no exit code failed too, as the runner counts it.
+            Files.writeString(root.resolve(".saffron/reports/latest.json"), """{"startedAt":"s1","totals":{"green":2,"yellow":0,"red":0},"hooks":[{"phase":"teardown","exitCode":null}]}""")
+            assertTrue(ai.saffron.jetbrains.ui.teardownFailedFor(root, "s1"))
+            Files.writeString(root.resolve(".saffron/reports/latest.json"), """{"startedAt":"s1","totals":{"green":2,"yellow":0,"red":0},"hooks":[{"phase":"teardown","exitCode":0}]}""")
+            assertFalse(ai.saffron.jetbrains.ui.teardownFailedFor(root, "s1"))
         } finally {
             root.toFile().deleteRecursively()
         }
@@ -757,6 +768,8 @@ class SaffronPluginTest : BasePlatformTestCase() {
         val stopped = ProjectStatus(lastRun = StatusLastRun(attention = emptyList(), interrupted = true, notRun = 4))
         assertEquals("Run interrupted: 4 scenario(s) did not run, and count as neither passed nor failed", ai.saffron.jetbrains.ui.lastRunEmptyText(stopped))
         assertEquals("Everything passed: 0 green in the last run", ai.saffron.jetbrains.ui.lastRunEmptyText(ProjectStatus(lastRun = StatusLastRun(attention = emptyList()))))
+        // A failed teardown after an all-green run (the runner exits 2) never reads as everything passed.
+        assertEquals("Teardown failed: the scenarios passed; check for processes or containers left running", ai.saffron.jetbrains.ui.lastRunEmptyText(ProjectStatus(lastRun = StatusLastRun(attention = emptyList())), teardownFailed = true))
         assertEquals("Update saffron-ai to 0.7.2 or later, which lists failure screenshots", ai.saffron.jetbrains.ui.lastRunEmptyText(ProjectStatus(lastRun = StatusLastRun(attention = null))))
         assertEquals("A", ai.saffron.jetbrains.ui.attentionLabel(webkit, matrix = false))
         assertEquals("features/a.saffron:A@webkit", ai.saffron.jetbrains.ui.attentionTraceSelector(webkit))

@@ -29,7 +29,7 @@ import javax.swing.tree.TreePath
 internal class Screenshot(val file: VirtualFile? = null, val problem: String? = null)
 
 /** What the tab says when it lists no scenario. An interrupted run never reads as everything passed. */
-internal fun lastRunEmptyText(status: ProjectStatus?): String {
+internal fun lastRunEmptyText(status: ProjectStatus?, teardownFailed: Boolean = false): String {
     val run = status?.lastRun
     return when {
         status == null -> "Loading…"
@@ -37,6 +37,8 @@ internal fun lastRunEmptyText(status: ProjectStatus?): String {
         // Saying "everything passed" would be a claim this data cannot support.
         run.attention == null -> "Update saffron-ai to 0.7.2 or later, which lists failure screenshots"
         run.interrupted -> "Run interrupted: ${run.notRun ?: "some"} scenario(s) did not run, and count as neither passed nor failed"
+        // The runner exits 2 for it (VS Code's words).
+        teardownFailed -> "Teardown failed: the scenarios passed; check for processes or containers left running"
         else -> "Everything passed: ${run.totals.green} green in the last run"
     }
 }
@@ -131,6 +133,8 @@ class LastRunTab(project: Project, parent: Disposable) : StatusTab(project, pare
     private var features: List<StatusFeature> = emptyList()
     /** When the listed run started: Open Replay names it, so a later run is not opened in its place. */
     private var shownRun: String? = null
+    /** The status shown: a disk read started for an earlier one no longer applies. */
+    private var rendered: ProjectStatus? = null
     /** The listed run's HTML report, project-relative. */
     private var reportHtml: String? = null
     private val tree = Tree(model).apply {
@@ -179,6 +183,7 @@ class LastRunTab(project: Project, parent: Disposable) : StatusTab(project, pare
         // dropped it, and Open Replay then replayed every traced scenario (found in review).
         val was = selected()?.let(::attentionTraceSelector)
         root.removeAllChildren()
+        rendered = status
         features = status?.features ?: emptyList()
         val run = status?.lastRun
         reportHtml = run?.reportHtml
@@ -186,6 +191,14 @@ class LastRunTab(project: Project, parent: Disposable) : StatusTab(project, pare
         shownRun = run?.startedAt?.takeIf { it.isNotBlank() && runnerAtLeast(status?.version ?: "", 0, 9, 1) }
         val attention = run?.attention
         tree.emptyText.text = lastRunEmptyText(status)
+        // An all-green run whose teardown failed: its report, when it is this run's, keeps the hooks the status leaves out.
+        val started = run?.startedAt
+        if (run != null && attention?.isEmpty() == true && !run.interrupted && !started.isNullOrBlank()) {
+            val base = projectRoot
+            offUiThread(project, alive, { teardownFailedFor(base, started) }) { failed ->
+                if (failed && rendered === status) tree.emptyText.text = lastRunEmptyText(status, teardownFailed = true)
+            }
+        }
         // Cut short with scenarios listed: the tree says so above them.
         if (run != null && run.interrupted && !attention.isNullOrEmpty()) {
             root.add(DefaultMutableTreeNode(RunRow("Run interrupted", "${run.notRun ?: "some"} not run", AllIcons.Actions.Suspend)))

@@ -1,6 +1,7 @@
 package ai.saffron.jetbrains.ui
 
 import ai.saffron.jetbrains.run.SaffronCommand
+import com.google.gson.JsonObject
 import com.google.gson.JsonParser
 import com.intellij.openapi.util.io.FileUtil
 import java.nio.file.Files
@@ -37,14 +38,29 @@ data class LastRun(
     val notRun: Int? = null,
     /** Reds the app did not cause (a stale recording without the agent, the environment): counted in [red], shown as not run. */
     val blocked: Int = 0,
+    /** The teardown failed: the runner exits 2 for the run, even when every scenario passed. */
+    val teardownFailed: Boolean = false,
 ) {
     /** The panel's line: an interrupted run never reads as a finished one. */
     fun summary(ago: String): String {
         val cost = costUsd?.let { "$" + "%.2f".format(it) } ?: "cost not reported"
         val stopped = if (interrupted) "Run interrupted (${notRun ?: "some"} not run): " else "Last run: "
-        return "$stopped$green passed · $yellow pending review · ${failedCount(red, blocked)} · $cost$ago"
+        return "$stopped$green passed · $yellow pending review · ${failedCount(red, blocked)} · $cost$ago" + if (teardownFailed) " · teardown failed" else ""
     }
 }
+
+/** Whether a run report's teardown failed, as the runner's hookFailed reads it: any exit code but 0, none included. */
+internal fun teardownFailed(report: JsonObject): Boolean =
+    report.get("hooks")?.takeIf { it.isJsonArray }?.asJsonArray?.any { h ->
+        h.isJsonObject && h.asJsonObject.get("phase")?.takeIf { it.isJsonPrimitive }?.asString == "teardown" &&
+            h.asJsonObject.get("exitCode").let { it == null || !it.isJsonPrimitive || !it.asJsonPrimitive.isNumber || it.asDouble != 0.0 }
+    } == true
+
+/** Whether the run that started at [startedAt] failed its teardown, from the project's latest.json; false when that report is another run's. Reads the disk. */
+internal fun teardownFailedFor(base: Path, startedAt: String): Boolean = runCatching {
+    val root = JsonParser.parseString(Files.readString(base.resolve(".saffron/reports/latest.json"))).asJsonObject
+    root.get("startedAt")?.takeIf { it.isJsonPrimitive }?.asString == startedAt && teardownFailed(root)
+}.getOrDefault(false)
 
 data class SaffronProjectState(
     val files: List<SaffronFile>,
@@ -293,6 +309,7 @@ object SaffronProjectScan {
                 finishedAt = root.get("finishedAt")?.asString?.let { runCatching { Instant.parse(it) }.getOrNull() },
                 interrupted = root.get("interrupted")?.asBoolean == true,
                 notRun = root.get("notRun")?.takeIf { it.isJsonPrimitive }?.asInt,
+                teardownFailed = teardownFailed(root),
                 blocked = root.getAsJsonArray("scenarios")?.count { s -> s.isJsonObject && s.asJsonObject.let { it.get("status")?.asString == "red" && it.get("blocked")?.isJsonPrimitive == true } } ?: 0,
             )
         }.getOrNull()

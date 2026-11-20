@@ -1,3 +1,9 @@
+<h3>Unreleased</h3>
+<ul>
+  <li>After a run whose scenarios all passed and whose teardown failed, the Last Run tab says "Teardown failed: the scenarios passed; check for processes or containers left running" instead of "Everything passed", and the Files tab's last run line ends "teardown failed". The runner exits 2 for such a run.</li>
+  <li>The Marketplace description now names the one repair, a database check whose query breaks on a schema change, held for review. It also says the agent calls your API as well as driving a browser, and lists what the editor marks today.</li>
+  <li>The Health tab no longer says replay uses the newest recording of a divergent step.</li>
+</ul>
 <h3>0.8.3</h3>
 <ul>
   <li>On Windows, the Files tab lists a test folder on another drive than the project (<code>"features": "D:\\e2e"</code>), or reached through a junction to one, by each file's full path, as the runner does. It listed nothing.</li>
