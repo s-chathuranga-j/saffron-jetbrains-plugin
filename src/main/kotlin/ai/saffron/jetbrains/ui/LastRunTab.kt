@@ -1,6 +1,9 @@
 package ai.saffron.jetbrains.ui
 
 import ai.saffron.jetbrains.run.SaffronRunner
+import com.google.gson.JsonElement
+import com.google.gson.JsonObject
+import com.google.gson.JsonParser
 import com.intellij.icons.AllIcons
 import com.intellij.ide.BrowserUtil
 import com.intellij.openapi.Disposable
@@ -102,19 +105,88 @@ internal fun screenshotToShow(base: String, shot: StatusEvidence, scenario: Stri
     return Screenshot(file = vf)
 }
 
-/** A Last Run row's tooltip: after an import the report's text comes from CI, so it is escaped. */
-internal fun attentionTooltip(a: StatusAttention, screenshot: Boolean): String? = tooltipHtml(
+/** A Last Run row's tooltip: after an import the report's text comes from CI, so it is escaped. [report]: lines from the run's report. */
+internal fun attentionTooltip(a: StatusAttention, screenshot: Boolean, report: List<String> = emptyList()): String? = tooltipHtml(
     "${a.feature} › ${a.scenario}",
     a.failedStep?.let { "Failed step: $it" },
     a.error,
     if (screenshot) "Double-click to open the screenshot." else "No screenshot for this one; double-click opens the scenario.",
+    *report.toTypedArray(),
 )
+
+/** The project's .saffron/reports/latest.json while it is the report of the run that started at [startedAt]; else null. Reads the disk. */
+internal fun runReport(base: java.nio.file.Path, startedAt: String): JsonObject? = runCatching {
+    JsonParser.parseString(java.nio.file.Files.readString(base.resolve(".saffron/reports/latest.json"))).asJsonObject
+        .takeIf { it.get("startedAt")?.takeIf { s -> s.isJsonPrimitive }?.asString == startedAt }
+}.getOrNull()
+
+/** The runner's REPORT_ROWS (src/db/index.ts): the most rows of one check a report keeps. */
+private const val REPORT_ROWS = 5
+
+private fun text(e: JsonElement?): String? = e?.takeIf { it.isJsonPrimitive }?.asString
+private fun objects(e: JsonElement?): List<JsonObject> = e?.takeIf { it.isJsonArray }?.asJsonArray?.filter { it.isJsonObject }?.map { it.asJsonObject } ?: emptyList()
+private fun texts(e: JsonElement?): List<String> = e?.takeIf { it.isJsonArray }?.asJsonArray?.mapNotNull(::text) ?: emptyList()
+
+/** The report's scenario named by [feature], [scenario] and [browser], as a Last Run row names it; null when none. */
+private fun reportScenario(report: JsonObject?, a: StatusAttention): JsonObject? = objects(report?.get("scenarios")).firstOrNull { lists(a, it) }
+
+/** Whether the Last Run row [a] is the report's scenario [s]. */
+private fun lists(a: StatusAttention, s: JsonObject): Boolean =
+    text(s.get("feature"))?.replace('\\', '/') == a.feature.replace('\\', '/') && text(s.get("scenario")) == a.scenario && text(s.get("browser")) == a.browser
+
+/** The runner's cleanupPanel words (src/report/html.ts): rows database cleanup could not undo, named to remove by hand. */
+private fun cleanupLines(rows: List<String>): List<String> =
+    if (rows.isEmpty()) emptyList()
+    else listOf("Database cleanup could not undo ${rows.size} row${if (rows.size == 1) "" else "s"} this scenario wrote: remove ${if (rows.size == 1) "it" else "them"} by hand. The verdict stands.") + rows
+
+/**
+ * What a run report keeps about a Last Run row beyond status, as plain lines, in the runner's report's words
+ * (src/report/html.ts): the rows each database check found (`dbRows` on a step result: the database it ran on, the
+ * count, the statement, the first rows, masked as the runner kept them), then the rows cleanup could not undo
+ * (`dbCleanup`). The report may be an imported CI run's: read as untrusted, every value as text.
+ */
+internal fun reportStepLines(report: JsonObject?, a: StatusAttention): List<String> {
+    val scenario = reportScenario(report, a) ?: return emptyList()
+    val checks = objects(scenario.get("steps")).flatMap { step ->
+        objects(step.get("dbRows")).flatMap { c ->
+            val count = c.get("count")?.takeIf { it.isJsonPrimitive && it.asJsonPrimitive.isNumber }?.asInt ?: 0
+            val rows = c.get("rows")?.takeIf { it.isJsonArray }?.asJsonArray?.take(REPORT_ROWS) ?: emptyList()
+            val gherkin = text(step.get("gherkin"))?.lineSequence()?.first()?.trim().orEmpty()
+            val sql = text(c.get("sql")).orEmpty().replace(Regex("\\s+"), " ").trim()
+            val db = text(c.get("database"))?.let { "the $it database" } ?: "database"
+            listOf("In \"$gherkin\", $db: $count row${if (count == 1) "" else "s"} · $sql") +
+                rows.map { it.toString() } +
+                (if (count > rows.size) listOf("... ${count - rows.size} more") else emptyList())
+        }
+    }
+    return checks + cleanupLines(texts(scenario.get("dbCleanup")))
+}
+
+/**
+ * The rows cleanup could not undo that no listed row shows, as one row's count and tooltip lines: the run's own (a
+ * Fixture's, kept for its feature's scenarios until the run ended, the report's top-level `dbCleanup`), and those of
+ * scenarios status does not list (a green one's). Null when there are none.
+ */
+internal fun cleanupSummary(report: JsonObject?, attention: List<StatusAttention>): Pair<Int, List<String>>? {
+    report ?: return null
+    class Group(val fixture: Boolean, val feature: String, val scenario: String, val rows: List<String>)
+    val groups = objects(report.get("dbCleanup")).map { c -> Group(c.get("fixture")?.takeIf { it.isJsonPrimitive && it.asJsonPrimitive.isBoolean }?.asBoolean == true, text(c.get("feature")).orEmpty(), text(c.get("scenario")).orEmpty(), texts(c.get("rows"))) } +
+        objects(report.get("scenarios")).filter { s -> attention.none { a -> lists(a, s) } }
+            .map { s -> Group(false, text(s.get("feature")).orEmpty(), text(s.get("scenario")).orEmpty(), texts(s.get("dbCleanup"))) }
+    val kept = groups.filter { it.rows.isNotEmpty() }
+    val count = kept.sumOf { it.rows.size }
+    if (count == 0) return null
+    return count to (listOf("Cleanup could not undo these rows: remove them by hand. The verdicts stand.") + kept.flatMap { g ->
+        listOf("${if (g.fixture) "fixture" else "scenario"} \"${g.scenario}\" · ${g.feature}") +
+            (if (g.fixture) listOf("Its rows were the feature's, kept for its scenarios until the run ended.") else emptyList()) + g.rows
+    })
+}
 
 private class RunRow(
     val label: String,
     val detail: String = "",
     val icon: Icon? = null,
-    val tooltip: String? = null,
+    var tooltip: String? = null,
     val attention: StatusAttention? = null,
 ) {
     override fun toString(): String = label
@@ -230,6 +302,26 @@ class LastRunTab(project: Project, parent: Disposable) : StatusTab(project, pare
         }
         model.reload()
         TreeUtil.expandAll(tree)
+        // The rows each database check found are in the run's report, not in status: added to the tooltips once read.
+        // And the rows cleanup could not undo, in a row of their own when no listed row shows them.
+        if (attention != null && !started.isNullOrBlank()) {
+            val base = projectRoot
+            offUiThread(project, alive, { runReport(base, started) }) { report ->
+                if (report == null || rendered !== status) return@offUiThread
+                for (node in root.depthFirstEnumeration().toList()) {
+                    val r = (node as? DefaultMutableTreeNode)?.userObject as? RunRow ?: continue
+                    val a = r.attention ?: continue
+                    reportStepLines(report, a).takeIf { it.isNotEmpty() }?.let { r.tooltip = attentionTooltip(a, screenshotOf(a.evidence) != null, it) }
+                }
+                cleanupSummary(report, attention)?.let { (count, lines) ->
+                    // An all-green run lists nothing: what the empty tree said stays said above the row.
+                    if (root.childCount == 0) root.add(DefaultMutableTreeNode(RunRow(tree.emptyText.text, "", AllIcons.General.InspectionsOK)))
+                    root.add(DefaultMutableTreeNode(RunRow("Database cleanup", "$count row${if (count == 1) "" else "s"} left", AllIcons.General.Warning, tooltipHtml(*lines.toTypedArray()))))
+                    model.reload()
+                    TreeUtil.expandAll(tree)
+                }
+            }
+        }
         was?.let { w -> TreeUtil.findNode(root) { (it.userObject as? RunRow)?.attention?.let(::attentionTraceSelector) == w } }?.let { tree.selectionPath = TreePath(it.path) }
     }
 

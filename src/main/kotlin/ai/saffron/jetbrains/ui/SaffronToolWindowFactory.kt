@@ -10,7 +10,9 @@ import com.intellij.openapi.project.DumbAwareAction
 import com.intellij.openapi.project.Project
 import com.intellij.openapi.util.io.FileUtil
 import com.intellij.openapi.wm.ToolWindow
+import com.intellij.openapi.wm.ToolWindowAnchor
 import com.intellij.openapi.wm.ToolWindowFactory
+import com.intellij.openapi.wm.ToolWindowManager
 import com.intellij.ui.content.ContentFactory
 import java.nio.file.Path
 import javax.swing.JComponent
@@ -41,6 +43,24 @@ class SaffronToolWindowFactory : ToolWindowFactory, DumbAware {
         manager.addContent(factory.createContent(OrphansTab(project, parent), "Orphans", false))
         manager.addContent(factory.createContent(DashboardTab(project, parent), "Dashboard", false))
         toolWindow.setTitleActions(listOf(RootChooser(project)))
+    }
+}
+
+/** The tool window's id, as plugin.xml declares it. */
+internal const val TOOL_WINDOW_ID = "Saffron"
+
+/**
+ * The tool window registered now when the project opened without a Saffron project ([SaffronToolWindowFactory.isApplicableAsync]
+ * said no then, and the platform asks only once): as plugin.xml declares it. Call on the EDT.
+ */
+internal fun ensureToolWindow(project: Project) {
+    val manager = ToolWindowManager.getInstance(project)
+    if (project.isDisposed || manager.getToolWindow(TOOL_WINDOW_ID) != null) return
+    manager.registerToolWindow(TOOL_WINDOW_ID) {
+        anchor = ToolWindowAnchor.RIGHT
+        icon = ai.saffron.jetbrains.SaffronIcons.TOOL_WINDOW
+        stripeTitle = java.util.function.Supplier { TOOL_WINDOW_ID }
+        contentFactory = SaffronToolWindowFactory()
     }
 }
 

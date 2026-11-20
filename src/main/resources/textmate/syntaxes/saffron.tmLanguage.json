@@ -25,6 +25,9 @@
       "include": "#docstring"
     },
     {
+      "include": "#docstring-backticks"
+    },
+    {
       "include": "#table"
     }
   ],
@@ -116,6 +119,11 @@
     "docstring": {
       "begin": "^\\s*\"\"\"",
       "end": "^\\s*\"\"\"",
+      "name": "string.quoted.docstring.saffron"
+    },
+    "docstring-backticks": {
+      "begin": "^\\s*```",
+      "end": "^\\s*```",
       "name": "string.quoted.docstring.saffron"
     },
     "table": {

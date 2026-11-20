@@ -318,6 +318,11 @@ fun interface StatusListener {
     fun statusChanged(load: StatusLoad)
 }
 
+/** Told on the EDT, after a saffron.config.json appeared, moved or went, the Saffron projects found then (SaffronStatusService.ROOTS). */
+fun interface RootsListener {
+    fun rootsChanged(roots: List<Path>)
+}
+
 /**
  * Project-level cache of the status. Tabs subscribe; anything that changes
  * the project (a run finishing, files or proposals changing) calls
@@ -390,6 +395,26 @@ class SaffronStatusService(private val project: Project) : Disposable {
         }
     }
 
+    private val rootsAlarm = Alarm(Alarm.ThreadToUse.POOLED_THREAD, this)
+
+    /**
+     * A saffron.config.json added, moved or removed while the project is open (`saffron init`, a checkout): the
+     * projects are found again, then, with one found, the tool window is registered when the project opened without
+     * it, the status loads and [ROOTS] tells the language server (SAF-207). Debounced; the walk runs off the EDT.
+     */
+    fun rootsMayHaveChanged() {
+        rootsAlarm.cancelAllRequests()
+        rootsAlarm.addRequest({
+            val found = discoverRoots()
+            if (found.isEmpty()) return@addRequest
+            ApplicationManager.getApplication().invokeLater({
+                ai.saffron.jetbrains.ui.ensureToolWindow(project)
+                project.messageBus.syncPublisher(ROOTS).rootsChanged(found)
+            }, project.disposed)
+            refresh()
+        }, 300)
+    }
+
     /** Only the trust check repeats, not the project scan: the status loads once it passes. */
     private fun awaitTrust() {
         alarm.addRequest({ if (SaffronCommand.trusted(project)) refresh() else awaitTrust() }, UNTRUSTED_RECHECK_MS)
@@ -408,6 +433,8 @@ class SaffronStatusService(private val project: Project) : Disposable {
         const val UNTRUSTED = "Trust the project to load Saffron status"
 
         val TOPIC: Topic<StatusListener> = Topic.create("Saffron status", StatusListener::class.java)
+
+        val ROOTS: Topic<RootsListener> = Topic.create("Saffron projects", RootsListener::class.java)
 
         fun getInstance(project: Project): SaffronStatusService = project.getService(SaffronStatusService::class.java)
 

@@ -16,6 +16,11 @@
                                 serverId="saffron"
                                 languageId="saffron"/>
     </extensions>
+    <projectListeners>
+        <!-- Starts the server for files already open once a Saffron project appears (SAF-207). -->
+        <listener class="ai.saffron.jetbrains.SaffronLanguageServerStarter"
+                  topic="ai.saffron.jetbrains.ui.RootsListener"/>
+    </projectListeners>
     <actions>
         <!-- A Run lens from saffron lsp: LSP4IJ runs the action named after the lens's command. -->
         <action id="saffron.runScenario"

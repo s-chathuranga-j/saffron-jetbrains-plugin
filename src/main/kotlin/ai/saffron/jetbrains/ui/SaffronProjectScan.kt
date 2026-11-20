@@ -69,6 +69,8 @@ data class SaffronProjectState(
     val packageInstalled: Boolean,
     /** The test folder [files] were scanned in. */
     val featuresDir: Path? = null,
+    /** Why the runner refuses the config's `db` (every command stops on it), or null. */
+    val configProblem: String? = null,
 )
 
 /**
@@ -136,8 +138,15 @@ object SaffronProjectScan {
             pendingProposals = countProposals(base.resolve(".saffron/proposals")),
             packageInstalled = SaffronCommand.installedPackage(base.toString()) != null,
             featuresDir = features,
+            configProblem = configProblem(base),
         )
     }
+
+    /** The project's saffron.config.json `db` problem, as the runner words it; null without one, or for a file that is not JSON. */
+    internal fun configProblem(base: Path): String? = runCatching {
+        val config = JsonParser.parseString(Files.readString(base.resolve("saffron.config.json")).removePrefix("\uFEFF"))
+        if (config.isJsonObject && config.asJsonObject.has("db")) dbSettingsProblem(config.asJsonObject.get("db")) else null
+    }.getOrNull()
 
     /**
      * The feature files the runner runs in [dir], by the paths it reads them at: its walk
@@ -358,4 +367,47 @@ object SaffronRoots {
         }
         return top
     }
+}
+
+private val DATABASE_NAME = Regex("^[A-Za-z][A-Za-z0-9_-]*$")
+private val ENV_URL = Regex("^\\{env:[A-Za-z_][A-Za-z0-9_]*\\}$")
+
+/**
+ * The runner's dbSettingsProblem (src/db/index.ts): why the config's `db` cannot be used, in its words, or null.
+ * One database, or several by name under `db.databases`, never both. [db] is the value of the `db` key.
+ */
+internal fun dbSettingsProblem(db: com.google.gson.JsonElement): String? {
+    if (!db.isJsonObject) return "db in saffron.config.json must be an object, such as { \"url\": \"{env:DATABASE_URL}\" }"
+    val obj = db.asJsonObject
+    val own = obj.keySet().filter { it != "databases" }
+    if (!obj.has("databases")) return oneDatabaseProblem(obj, "db")
+    if (own.isNotEmpty()) return "db in saffron.config.json has both settings of one database (${own.joinToString(", ") { "\"$it\"" }}) and databases: put every database under db.databases, by name (a step that names no database uses the one named \"default\"), or drop databases"
+    val databases = obj.get("databases")
+    if (!databases.isJsonObject || databases.asJsonObject.size() == 0) return "db.databases in saffron.config.json must name each database, such as { \"default\": { \"url\": \"{env:DATABASE_URL}\" }, \"orders\": { \"url\": \"{env:ORDERS_DB_URL}\" } }"
+    for ((name, settings) in databases.asJsonObject.entrySet()) {
+        if (!DATABASE_NAME.matches(name)) return "db.databases.\"$name\" in saffron.config.json: a database name is letters, digits, \"-\" and \"_\", starting with a letter"
+        if (!settings.isJsonObject) return "db.databases.$name in saffron.config.json must be an object, such as { \"url\": \"{env:DATABASE_URL}\" }"
+        oneDatabaseProblem(settings.asJsonObject, "db.databases.$name")?.let { return it }
+    }
+    return null
+}
+
+/** The runner's oneDatabaseProblem: one database's settings, [where] being "db" or "db.databases.<name>". */
+private fun oneDatabaseProblem(db: com.google.gson.JsonObject, where: String): String? {
+    val rest = db.keySet().filter { it !in setOf("url", "writes", "allow", "timeout", "cleanup", "redactColumns") }
+    if (rest.isNotEmpty()) return "$where in saffron.config.json has ${rest.joinToString(", ") { "\"$it\"" }}, which Saffron does not read: it takes url, writes, allow, timeout, cleanup and redactColumns" + if (where == "db") ", or databases" else ""
+    fun string(e: com.google.gson.JsonElement?) = e?.takeIf { it.isJsonPrimitive && it.asJsonPrimitive.isString }?.asString
+    // A JSON null is a value of the key, as JavaScript reads it: only an absent key is undefined.
+    val timeout = db.get("timeout")
+    if (timeout != null && !(timeout.isJsonPrimitive && timeout.asJsonPrimitive.isNumber && timeout.asDouble.isFinite() && timeout.asDouble >= 0)) return "$where.timeout in saffron.config.json must be a number of milliseconds, 0 or more, without quotes"
+    val cleanup = db.get("cleanup")
+    if (cleanup != null && string(cleanup) !in listOf("all", "inserts", "none")) return "$where.cleanup in saffron.config.json must be \"all\", \"inserts\" or \"none\""
+    val url = string(db.get("url"))
+    if (url == null || !ENV_URL.matches(url.trim())) return "$where.url in saffron.config.json must read the connection string from the environment, such as \"{env:DATABASE_URL}\", so the password never sits in the file"
+    val writes = db.get("writes")
+    if (writes != null && !(writes.isJsonPrimitive && writes.asJsonPrimitive.isBoolean)) return "$where.writes in saffron.config.json must be true or false, without quotes"
+    fun names(e: com.google.gson.JsonElement?) = e == null || (e.isJsonArray && e.asJsonArray.all { string(it)?.isNotBlank() == true })
+    if (!names(db.get("allow"))) return "$where.allow in saffron.config.json must list host or database names, such as [\"localhost\", \"shop_test\"]"
+    if (!names(db.get("redactColumns"))) return "$where.redactColumns in saffron.config.json must list column names, such as [\"ssn\", \"date_of_birth\"]"
+    return null
 }

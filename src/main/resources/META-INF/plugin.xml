@@ -45,4 +45,10 @@
         <notificationGroup id="Saffron" displayType="BALLOON"/>
         <postStartupActivity implementation="ai.saffron.jetbrains.SaffronStartupActivity"/>
     </extensions>
+
+    <projectListeners>
+        <!-- A saffron.config.json that appears while the project is open brings the tool window and language server. -->
+        <listener class="ai.saffron.jetbrains.SaffronConfigListener"
+                  topic="com.intellij.openapi.vfs.newvfs.BulkFileListener"/>
+    </projectListeners>
 </idea-plugin>

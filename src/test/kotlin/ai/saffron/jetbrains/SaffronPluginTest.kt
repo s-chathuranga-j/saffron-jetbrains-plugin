@@ -1819,4 +1819,147 @@ class SaffronPluginTest : BasePlatformTestCase() {
             dir.toFile().deleteRecursively()
         }
     }
+
+    // SAF-259: the runner refuses every command on a `db` it cannot use (dbSettingsProblem in src/db/index.ts); the Files
+    // tab, which works without the runner, says so in its words. Cases from the runner's db and named-databases tests.
+    fun `test a db config the runner refuses is said in the Files tab, one database or several by name`() {
+        fun p(json: String) = ai.saffron.jetbrains.ui.dbSettingsProblem(com.google.gson.JsonParser.parseString(json))
+        assertNull(p("""{"url":"{env:DATABASE_URL}","writes":true,"allow":["localhost"],"timeout":0,"cleanup":"inserts","redactColumns":["ssn","Date_Of_Birth"]}"""))
+        assertNull(p("""{"databases":{"default":{"url":"{env:A}"},"orders":{"url":"{env:B}","writes":true,"allow":["x"]}}}"""))
+        assertTrue(p("null")!!.startsWith("db in saffron.config.json must be an object"))
+        assertTrue(p("""{"url":"postgres://u:secret@localhost/db"}""")!!.startsWith("db.url in saffron.config.json must read the connection string from the environment"))
+        assertEquals("db.writes in saffron.config.json must be true or false, without quotes", p("""{"url":"{env:A}","writes":"true"}"""))
+        assertEquals("db in saffron.config.json has \"alow\", which Saffron does not read: it takes url, writes, allow, timeout, cleanup and redactColumns, or databases", p("""{"url":"{env:A}","alow":[]}"""))
+        assertTrue(p("""{"url":"{env:A}","timeout":-1}""")!!.startsWith("db.timeout in saffron.config.json"))
+        assertTrue(p("""{"url":"{env:A}","timeout":"3000"}""")!!.startsWith("db.timeout in saffron.config.json"))
+        assertEquals("db.cleanup in saffron.config.json must be \"all\", \"inserts\" or \"none\"", p("""{"url":"{env:A}","cleanup":"some"}"""))
+        assertTrue(p("""{"url":"{env:A}","allow":["  "]}""")!!.startsWith("db.allow in saffron.config.json must list host or database names"))
+        assertTrue(p("""{"url":"{env:A}","redactColumns":"ssn"}""")!!.startsWith("db.redactColumns in saffron.config.json must list column names"))
+        assertTrue(p("""{"databases":{"hr":{"url":"{env:A}","redactColumns":[""]}}}""")!!.startsWith("db.databases.hr.redactColumns"))
+        assertTrue(p("""{"url":"{env:A}","databases":{"orders":{"url":"{env:B}"}}}""")!!.contains("both settings of one database (\"url\") and databases"))
+        assertTrue(p("""{"databases":{}}""")!!.startsWith("db.databases in saffron.config.json must name each database"))
+        assertTrue(p("""{"databases":null}""")!!.startsWith("db.databases in saffron.config.json must name each database"))
+        assertTrue(p("""{"databases":{"1st":{"url":"{env:B}"}}}""")!!.contains("a database name is letters"))
+        assertTrue(p("""{"databases":{"orders":"{env:B}"}}""")!!.startsWith("db.databases.orders in saffron.config.json must be an object"))
+        assertEquals("db.databases.orders in saffron.config.json has \"alow\", which Saffron does not read: it takes url, writes, allow, timeout, cleanup and redactColumns", p("""{"databases":{"orders":{"url":"{env:B}","alow":[]}}}"""))
+        val root = Files.createTempDirectory("saffron-db-config").toRealPath()
+        try {
+            Files.writeString(root.resolve("saffron.config.json"), "﻿{\"db\":{\"url\":\"{env:A}\",\"writes\":\"yes\"}}")
+            val state = SaffronProjectScan.scan(root.toString())
+            assertEquals("db.writes in saffron.config.json must be true or false, without quotes", ai.saffron.jetbrains.ui.filesHint(state))
+            // No db, or a file that is not JSON yet: nothing said, the install hint as before.
+            Files.writeString(root.resolve("saffron.config.json"), "{\"features\":\"features\"}")
+            assertNull(SaffronProjectScan.configProblem(root))
+            Files.writeString(root.resolve("saffron.config.json"), "{\"db\":")
+            assertNull(SaffronProjectScan.configProblem(root))
+            assertTrue(ai.saffron.jetbrains.ui.filesHint(SaffronProjectScan.scan(root.toString())).startsWith("saffron-ai is not installed here"))
+        } finally {
+            root.toFile().deleteRecursively()
+        }
+    }
+
+    // SAF-259: the rows a database check found are in the run's report (dbRows on a step result), not in status. A Last
+    // Run row's tooltip shows them as the runner's report does: the count, the statement, the first rows, "... N more".
+    fun `test a Last Run row shows the rows its database checks found, from this run's report only`() {
+        fun scenario(browser: String?) = """{"feature":"features/orders.saffron","scenario":"Order saved","status":"red",${browser?.let { "\"browser\":\"$it\"," } ?: ""}"steps":[
+            {"gherkin":"I place an order","status":"passed"},
+            {"gherkin":"the order should be saved","status":"failed","dbRows":[null,{"database":"orders","sql":"SELECT id, total\n  FROM orders WHERE email = ${'$'}1","count":7,"rows":[{"id":1,"total":"9.50"},{"id":2,"total":"<b>x</b>"}]}]}]}"""
+        val root = Files.createTempDirectory("saffron-db-rows").toRealPath()
+        try {
+            Files.createDirectories(root.resolve(".saffron/reports"))
+            Files.writeString(root.resolve(".saffron/reports/latest.json"), """{"startedAt":"s1","scenarios":[${scenario("firefox")},${scenario(null)}]}""")
+            val a = Gson().fromJson("""{"feature":"features/orders.saffron","scenario":"Order saved","status":"red","failedStep":"the order should be saved"}""", StatusAttention::class.java)
+            val report = ai.saffron.jetbrains.ui.runReport(root, "s1")
+            assertNotNull(report)
+            assertNull(ai.saffron.jetbrains.ui.runReport(root, "s2"))
+            val lines = ai.saffron.jetbrains.ui.reportStepLines(report, a)
+            assertEquals(listOf(
+                "In \"the order should be saved\", the orders database: 7 rows · SELECT id, total FROM orders WHERE email = ${'$'}1",
+                """{"id":1,"total":"9.50"}""",
+                """{"id":2,"total":"<b>x</b>"}""",
+                "... 5 more",
+            ), lines)
+            // Escaped in the tooltip: the report may be an imported CI run's.
+            val tip = ai.saffron.jetbrains.ui.attentionTooltip(a, false, lines)!!
+            assertTrue(tip, tip.contains("&lt;b&gt;x&lt;/b&gt;") && tip.contains("... 5 more"))
+            // Another scenario, or another browser's row, finds nothing of these.
+            assertEquals(emptyList<String>(), ai.saffron.jetbrains.ui.reportStepLines(report, Gson().fromJson("""{"feature":"features/orders.saffron","scenario":"Other"}""", StatusAttention::class.java)))
+            assertEquals(emptyList<String>(), ai.saffron.jetbrains.ui.reportStepLines(report, Gson().fromJson("""{"feature":"features/orders.saffron","scenario":"Order saved","browser":"webkit"}""", StatusAttention::class.java)))
+            // Rows cleanup could not undo: a listed scenario's in its tooltip; the run's own (a Fixture's) and a scenario's
+            // status does not list (a green one) in one row, in the runner's report's words.
+            val cleaned = com.google.gson.JsonParser.parseString("""{"startedAt":"s3","scenarios":[
+                {"feature":"features/orders.saffron","scenario":"Order saved","steps":[],"dbCleanup":["orders id=1"]},
+                {"feature":"features/orders.saffron","scenario":"Green","steps":[],"dbCleanup":["orders id=2","orders id=3"]}],
+                "dbCleanup":[{"feature":"features/orders.saffron","scenario":"Seed","fixture":true,"rows":["customers id=9"]}]}""").asJsonObject
+            assertEquals(listOf("Database cleanup could not undo 1 row this scenario wrote: remove it by hand. The verdict stands.", "orders id=1"), ai.saffron.jetbrains.ui.reportStepLines(cleaned, a))
+            val (count, box) = ai.saffron.jetbrains.ui.cleanupSummary(cleaned, listOf(a))!!
+            assertEquals(3, count)
+            assertEquals(listOf(
+                "Cleanup could not undo these rows: remove them by hand. The verdicts stand.",
+                "fixture \"Seed\" · features/orders.saffron", "Its rows were the feature's, kept for its scenarios until the run ended.", "customers id=9",
+                "scenario \"Green\" · features/orders.saffron", "orders id=2", "orders id=3",
+            ), box)
+            assertNull(ai.saffron.jetbrains.ui.cleanupSummary(report, listOf(a)))
+        } finally {
+            root.toFile().deleteRecursively()
+        }
+    }
+
+    // SAF-238: the runner reads ``` doc strings (docStringLines in src/parser/saffron-dialect.ts) as it reads """ ones; the
+    // grammar coloured only """. A fence closes only on its own kind.
+    fun `test the grammar colours backtick doc strings, with or without a media type`() {
+        val text = javaClass.getResourceAsStream("/textmate/syntaxes/saffron.tmLanguage.json")!!.use { String(it.readAllBytes(), Charsets.UTF_8) }
+        val grammar = com.google.gson.JsonParser.parseString(text).asJsonObject
+        val repository = grammar.getAsJsonObject("repository")
+        val rule = repository.getAsJsonObject("docstring-backticks")
+        assertTrue(grammar.getAsJsonArray("patterns").any { it.asJsonObject.get("include")?.asString == "#docstring-backticks" })
+        assertEquals(repository.getAsJsonObject("docstring").get("name").asString, rule.get("name").asString)
+        val begin = Regex(rule.get("begin").asString)
+        val end = Regex(rule.get("end").asString)
+        for (line in listOf("    ```", "    ```json", "```")) assertTrue(line, begin.containsMatchIn(line))
+        assertTrue(end.containsMatchIn("    ```"))
+        assertFalse(end.containsMatchIn("    \"\"\""))
+        assertFalse(Regex(repository.getAsJsonObject("docstring").get("end").asString).containsMatchIn("    ```"))
+    }
+
+    // SAF-207: the tool window and the language server were decided once, at project open; `saffron init` in the open
+    // project brought neither until it was reopened.
+    fun `test a saffron config added under the project is noticed, a config elsewhere or another file is not`() {
+        val fs = com.intellij.openapi.vfs.LocalFileSystem.getInstance()
+        val base = Path.of(project.basePath!!)
+        Files.createDirectories(base)
+        val dir = fs.refreshAndFindFileByNioFile(base)!!
+        fun create(name: String, directory: Boolean = false) = com.intellij.openapi.vfs.newvfs.events.VFileCreateEvent(null, dir, name, directory, null, null, null)
+        assertTrue(SaffronConfigListener.touchesConfig(base.toString(), listOf(create("saffron.config.json"))))
+        assertTrue(SaffronConfigListener.touchesConfig(base.toString(), listOf(create("e2e", directory = true))))
+        assertFalse(SaffronConfigListener.touchesConfig(base.toString(), listOf(create("package.json"))))
+        assertFalse(SaffronConfigListener.touchesConfig("/elsewhere", listOf(create("saffron.config.json"))))
+    }
+
+    fun `test a saffron config written into the open project registers the tool window`() {
+        if (SystemInfo.isWindows) return
+        val base = Path.of(project.basePath!!)
+        val manager = com.intellij.openapi.wm.ToolWindowManager.getInstance(project)
+        try {
+            Files.createDirectories(base)
+            // The runner stand-in: the status the registration loads never runs npx.
+            standInCases(base, "")
+            if (manager.getToolWindow("Saffron") != null) manager.unregisterToolWindow("Saffron")
+            assertTrue(SaffronStatusService.getInstance(project).discoverRoots().none { Files.exists(it.resolve("saffron.config.json")) })
+            // The VFS knows the project folder's children, as an IDE showing the project does: a file added there is an event.
+            val dir = com.intellij.openapi.vfs.LocalFileSystem.getInstance().refreshAndFindFileByNioFile(base)!!
+            VfsUtil.markDirtyAndRefresh(false, true, true, dir)
+            dir.children
+            Files.writeString(base.resolve("saffron.config.json"), "{}")
+            VfsUtil.markDirtyAndRefresh(false, true, true, dir)
+            PlatformTestUtil.waitWithEventsDispatching("the tool window was never registered", { manager.getToolWindow("Saffron") != null }, 20)
+            assertEquals(listOf(base.toRealPath()), SaffronStatusService.getInstance(project).roots.map { it.toRealPath() })
+        } finally {
+            if (manager.getToolWindow("Saffron") != null) manager.unregisterToolWindow("Saffron")
+            Files.deleteIfExists(base.resolve("saffron.config.json"))
+            base.resolve("node_modules").toFile().deleteRecursively()
+            // The VFS forgets the config too: a later test finding it there would open a file that is gone.
+            com.intellij.openapi.vfs.LocalFileSystem.getInstance().refreshAndFindFileByNioFile(base)?.let { VfsUtil.markDirtyAndRefresh(false, true, true, it) }
+        }
+    }
 }

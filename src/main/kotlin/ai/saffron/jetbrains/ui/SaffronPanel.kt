@@ -286,7 +286,7 @@ class SaffronPanel(private val project: Project, parent: Disposable) : SimpleToo
             1 -> "1 proposal pending review$held (Accept All Proposals, or saffron accept)."
             else -> "$pendingCount proposals pending review$held (Accept All Proposals, or saffron accept)."
         }
-        hint.text = if (s.packageInstalled) "" else "saffron-ai is not installed here: runs fall back to npx. Run npm i -D saffron-ai."
+        hint.text = filesHint(s)
     }
 
     /** The shown files' ticks into [checked]; files the search hides keep theirs. */
@@ -318,6 +318,13 @@ class SaffronPanel(private val project: Project, parent: Disposable) : SimpleToo
         }
         return " · $text"
     }
+}
+
+/** The Files tab's last line: a `db` config the runner refuses first (it refuses to load the config), then a missing package. */
+internal fun filesHint(s: SaffronProjectState): String = when {
+    s.configProblem != null -> s.configProblem
+    !s.packageInstalled -> "saffron-ai is not installed here: runs fall back to npx. Run npm i -D saffron-ai."
+    else -> ""
 }
 
 /** A Files row: a file the runner cannot parse runs no scenario, whatever its Scenario lines count. */
