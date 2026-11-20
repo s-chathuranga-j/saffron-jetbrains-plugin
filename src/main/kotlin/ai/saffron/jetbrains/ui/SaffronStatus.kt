@@ -405,13 +405,21 @@ class SaffronStatusService(private val project: Project) : Disposable {
     fun rootsMayHaveChanged() {
         rootsAlarm.cancelAllRequests()
         rootsAlarm.addRequest({
+            val before = roots
             val found = discoverRoots()
-            if (found.isEmpty()) return@addRequest
-            ApplicationManager.getApplication().invokeLater({
-                ai.saffron.jetbrains.ui.ensureToolWindow(project)
+            if (found.isEmpty() || project.isDisposed) return@addRequest
+            // Once the tool window manager has registered the declared tool windows: never a second "Saffron" beside it.
+            val manager = com.intellij.openapi.wm.ToolWindowManager.getInstance(project)
+            val follow = Runnable {
+                // Nothing new: no status process, no server start, for a project that already had both.
+                if (project.isDisposed || (found == before && manager.getToolWindow(TOOL_WINDOW_ID) != null)) return@Runnable
+                ensureToolWindow(project)
                 project.messageBus.syncPublisher(ROOTS).rootsChanged(found)
-            }, project.disposed)
-            refresh()
+                refresh()
+            }
+            // The headless manager of the tests drops what it is handed to run later.
+            val app = ApplicationManager.getApplication()
+            if (app.isUnitTestMode) app.invokeLater(follow, project.disposed) else manager.invokeLater(follow)
         }, 300)
     }
 

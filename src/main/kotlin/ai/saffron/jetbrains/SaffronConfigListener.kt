@@ -18,14 +18,19 @@ import com.intellij.openapi.vfs.newvfs.events.VFilePropertyChangeEvent
 class SaffronConfigListener(private val project: Project) : BulkFileListener {
     override fun after(events: List<VFileEvent>) {
         val base = project.basePath ?: return
-        if (touchesConfig(base, events)) SaffronStatusService.getInstance(project).rootsMayHaveChanged()
+        val service = SaffronStatusService.getInstance(project)
+        if (touchesConfig(base, events, folders = service.roots.isEmpty())) service.rootsMayHaveChanged()
     }
 
     internal companion object {
         private const val CONFIG = "saffron.config.json"
 
-        /** Whether [events] add, move, rename or remove a saffron.config.json under [base] (where discovery looks). */
-        fun touchesConfig(base: String, events: List<VFileEvent>): Boolean {
+        /**
+         * Whether [events] add, move, rename or remove a saffron.config.json under [base] (where discovery looks); with
+         * [folders], while no Saffron project is known, a folder created, moved or copied in too, which may hold one.
+         * Not otherwise: a run's artifacts folder or an npm install is no reason to look again.
+         */
+        fun touchesConfig(base: String, events: List<VFileEvent>, folders: Boolean): Boolean {
             val root = FileUtil.toSystemIndependentName(base).trimEnd('/') + "/"
             return events.any { e ->
                 val paths = listOfNotNull(
@@ -35,7 +40,7 @@ class SaffronConfigListener(private val project: Project) : BulkFileListener {
                     (e as? VFileCopyEvent)?.let { "${it.newParent.path}/${it.newChildName}" },
                 )
                 // A folder created or moved in may hold one: the VFS reports the folder alone.
-                val folder = (e is VFileCreateEvent && e.isDirectory) || ((e is VFileMoveEvent || e is VFileCopyEvent) && e.file?.isDirectory == true)
+                val folder = folders && ((e is VFileCreateEvent && e.isDirectory) || ((e is VFileMoveEvent || e is VFileCopyEvent) && e.file?.isDirectory == true))
                 paths.any { p -> p.startsWith(root) && (p.endsWith("/$CONFIG") || folder) }
             }
         }

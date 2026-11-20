@@ -1930,10 +1930,12 @@ class SaffronPluginTest : BasePlatformTestCase() {
         Files.createDirectories(base)
         val dir = fs.refreshAndFindFileByNioFile(base)!!
         fun create(name: String, directory: Boolean = false) = com.intellij.openapi.vfs.newvfs.events.VFileCreateEvent(null, dir, name, directory, null, null, null)
-        assertTrue(SaffronConfigListener.touchesConfig(base.toString(), listOf(create("saffron.config.json"))))
-        assertTrue(SaffronConfigListener.touchesConfig(base.toString(), listOf(create("e2e", directory = true))))
-        assertFalse(SaffronConfigListener.touchesConfig(base.toString(), listOf(create("package.json"))))
-        assertFalse(SaffronConfigListener.touchesConfig("/elsewhere", listOf(create("saffron.config.json"))))
+        assertTrue(SaffronConfigListener.touchesConfig(base.toString(), listOf(create("saffron.config.json")), folders = false))
+        // A folder only while no Saffron project is known: a run's artifacts folder is no reason to look again.
+        assertTrue(SaffronConfigListener.touchesConfig(base.toString(), listOf(create("e2e", directory = true)), folders = true))
+        assertFalse(SaffronConfigListener.touchesConfig(base.toString(), listOf(create("e2e", directory = true)), folders = false))
+        assertFalse(SaffronConfigListener.touchesConfig(base.toString(), listOf(create("package.json")), folders = true))
+        assertFalse(SaffronConfigListener.touchesConfig("/elsewhere", listOf(create("saffron.config.json")), folders = true))
     }
 
     fun `test a saffron config written into the open project registers the tool window`() {
@@ -1960,6 +1962,24 @@ class SaffronPluginTest : BasePlatformTestCase() {
             base.resolve("node_modules").toFile().deleteRecursively()
             // The VFS forgets the config too: a later test finding it there would open a file that is gone.
             com.intellij.openapi.vfs.LocalFileSystem.getInstance().refreshAndFindFileByNioFile(base)?.let { VfsUtil.markDirtyAndRefresh(false, true, true, it) }
+        }
+    }
+
+    // SAF-259: an all-green run lists no scenario, and still names the rows database cleanup could not undo.
+    fun `test Last Run shows the rows cleanup left after an all-green run, from that run's report`() {
+        if (SystemInfo.isWindows) return
+        val base = Path.of(project.basePath!!)
+        try {
+            standInCases(base, """  *) echo '{"packageInstalled":true,"lastRun":{"startedAt":"c1","totals":{"scenarios":1,"green":1},"attention":[]}}' ;;""")
+            Files.createDirectories(base.resolve(".saffron/reports"))
+            Files.writeString(base.resolve(".saffron/reports/latest.json"), """{"startedAt":"c1","scenarios":[],"dbCleanup":[{"feature":"features/a.saffron","scenario":"Seed","fixture":true,"rows":["customers id=9"]}]}""")
+            val tab = LastRunTab(project, testRootDisposable)
+            val tree = UIUtil.findComponentOfType(tab, Tree::class.java)!!
+            fun rows() = (tree.model.root as DefaultMutableTreeNode).children().toList().map { it.toString() }
+            PlatformTestUtil.waitWithEventsDispatching("the cleanup row never came: ${'$'}{rows()}", { rows() == listOf("Everything passed: 1 green in the last run", "Database cleanup") }, 60)
+        } finally {
+            base.resolve("node_modules").toFile().deleteRecursively()
+            base.resolve(".saffron").toFile().deleteRecursively()
         }
     }
 }

@@ -263,14 +263,7 @@ class LastRunTab(project: Project, parent: Disposable) : StatusTab(project, pare
         shownRun = run?.startedAt?.takeIf { it.isNotBlank() && runnerAtLeast(status?.version ?: "", 0, 9, 1) }
         val attention = run?.attention
         tree.emptyText.text = lastRunEmptyText(status)
-        // An all-green run whose teardown failed: its report, when it is this run's, keeps the hooks the status leaves out.
         val started = run?.startedAt
-        if (run != null && attention?.isEmpty() == true && !run.interrupted && !started.isNullOrBlank()) {
-            val base = projectRoot
-            offUiThread(project, alive, { teardownFailedFor(base, started) }) { failed ->
-                if (failed && rendered === status) tree.emptyText.text = lastRunEmptyText(status, teardownFailed = true)
-            }
-        }
         // Cut short with scenarios listed: the tree says so above them.
         if (run != null && run.interrupted && !attention.isNullOrEmpty()) {
             root.add(DefaultMutableTreeNode(RunRow("Run interrupted", "${run.notRun ?: "some"} not run", AllIcons.Actions.Suspend)))
@@ -303,11 +296,14 @@ class LastRunTab(project: Project, parent: Disposable) : StatusTab(project, pare
         model.reload()
         TreeUtil.expandAll(tree)
         // The rows each database check found are in the run's report, not in status: added to the tooltips once read.
-        // And the rows cleanup could not undo, in a row of their own when no listed row shows them.
-        if (attention != null && !started.isNullOrBlank()) {
+        // What the status leaves out, from the run's own report (one read): an all-green run whose teardown failed (the
+        // report keeps the hooks), the rows each database check found (in the rows' tooltips), and the rows cleanup could
+        // not undo, in a row of their own when no listed row shows them.
+        if (run != null && attention != null && !started.isNullOrBlank()) {
             val base = projectRoot
             offUiThread(project, alive, { runReport(base, started) }) { report ->
                 if (report == null || rendered !== status) return@offUiThread
+                if (attention.isEmpty() && !run.interrupted && teardownFailed(report)) tree.emptyText.text = lastRunEmptyText(status, teardownFailed = true)
                 for (node in root.depthFirstEnumeration().toList()) {
                     val r = (node as? DefaultMutableTreeNode)?.userObject as? RunRow ?: continue
                     val a = r.attention ?: continue
@@ -315,10 +311,10 @@ class LastRunTab(project: Project, parent: Disposable) : StatusTab(project, pare
                 }
                 cleanupSummary(report, attention)?.let { (count, lines) ->
                     // An all-green run lists nothing: what the empty tree said stays said above the row.
-                    if (root.childCount == 0) root.add(DefaultMutableTreeNode(RunRow(tree.emptyText.text, "", AllIcons.General.InspectionsOK)))
-                    root.add(DefaultMutableTreeNode(RunRow("Database cleanup", "$count row${if (count == 1) "" else "s"} left", AllIcons.General.Warning, tooltipHtml(*lines.toTypedArray()))))
-                    model.reload()
-                    TreeUtil.expandAll(tree)
+                    // Inserted, not reloaded: the row selected stays selected.
+                    if (root.childCount == 0) model.insertNodeInto(DefaultMutableTreeNode(RunRow(tree.emptyText.text, "", AllIcons.General.InspectionsOK)), root, 0)
+                    model.insertNodeInto(DefaultMutableTreeNode(RunRow("Database cleanup", "$count row${if (count == 1) "" else "s"} left", AllIcons.General.Warning, tooltipHtml(*lines.toTypedArray()))), root, root.childCount)
+                    tree.expandPath(TreePath(root.path))
                 }
             }
         }
