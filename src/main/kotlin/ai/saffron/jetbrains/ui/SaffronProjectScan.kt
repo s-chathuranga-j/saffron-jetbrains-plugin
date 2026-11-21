@@ -144,9 +144,20 @@ object SaffronProjectScan {
 
     /** The project's saffron.config.json `db` problem, as the runner words it; null without one, or for a file that is not JSON. */
     internal fun configProblem(base: Path): String? = runCatching {
-        val config = JsonParser.parseString(Files.readString(base.resolve("saffron.config.json")).removePrefix("\uFEFF"))
+        val config = strictJson(Files.readString(base.resolve("saffron.config.json")).removePrefix("\uFEFF"))
         if (config.isJsonObject && config.asJsonObject.has("db")) dbSettingsProblem(config.asJsonObject.get("db")) else null
     }.getOrNull()
+
+    /**
+     * [text] as JSON.parse reads it, or a throw: Gson's JsonParser is lenient (single quotes, unquoted names, comments,
+     * a trailing value), and would check a file the runner refuses as not JSON at all.
+     */
+    internal fun strictJson(text: String): com.google.gson.JsonElement {
+        val reader = com.google.gson.stream.JsonReader(java.io.StringReader(text)).apply { isLenient = false }
+        val element = com.google.gson.Gson().getAdapter(com.google.gson.JsonElement::class.java).read(reader)
+        if (reader.peek() != com.google.gson.stream.JsonToken.END_DOCUMENT) throw com.google.gson.JsonSyntaxException("more than one value")
+        return element
+    }
 
     /**
      * The feature files the runner runs in [dir], by the paths it reads them at: its walk

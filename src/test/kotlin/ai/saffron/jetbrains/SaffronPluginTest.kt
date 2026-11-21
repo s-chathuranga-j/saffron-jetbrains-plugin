@@ -1852,6 +1852,11 @@ class SaffronPluginTest : BasePlatformTestCase() {
             assertNull(SaffronProjectScan.configProblem(root))
             Files.writeString(root.resolve("saffron.config.json"), "{\"db\":")
             assertNull(SaffronProjectScan.configProblem(root))
+            // JSON the runner refuses to read at all is not checked as if it were: Gson's own parser would read these.
+            for (loose in listOf("{'db': {'url': 1}}", "{db: {\"url\": 1}}", "{\"db\": {\"url\": 1}} // note", "{\"db\": {\"url\": 1}} {}")) {
+                Files.writeString(root.resolve("saffron.config.json"), loose)
+                assertNull(loose, SaffronProjectScan.configProblem(root))
+            }
             assertTrue(ai.saffron.jetbrains.ui.filesHint(SaffronProjectScan.scan(root.toString())).startsWith("saffron-ai is not installed here"))
         } finally {
             root.toFile().deleteRecursively()
@@ -1891,15 +1896,23 @@ class SaffronPluginTest : BasePlatformTestCase() {
                 {"feature":"features/orders.saffron","scenario":"Order saved","steps":[],"dbCleanup":["orders id=1"]},
                 {"feature":"features/orders.saffron","scenario":"Green","steps":[],"dbCleanup":["orders id=2","orders id=3"]}],
                 "dbCleanup":[{"feature":"features/orders.saffron","scenario":"Seed","fixture":true,"rows":["customers id=9"]}]}""").asJsonObject
-            assertEquals(listOf("Database cleanup could not undo 1 row this scenario wrote: remove it by hand. The verdict stands.", "orders id=1"), ai.saffron.jetbrains.ui.reportStepLines(cleaned, a))
+            assertEquals(listOf("database cleanup", "Cleanup could not undo 1 row this scenario wrote: remove it by hand. The verdict stands.", "orders id=1"), ai.saffron.jetbrains.ui.reportStepLines(cleaned, a))
             val (count, box) = ai.saffron.jetbrains.ui.cleanupSummary(cleaned, listOf(a))!!
             assertEquals(3, count)
             assertEquals(listOf(
+                "database cleanup",
                 "Cleanup could not undo these rows: remove them by hand. The verdicts stand.",
                 "fixture \"Seed\" · features/orders.saffron", "Its rows were the feature's, kept for its scenarios until the run ended.", "customers id=9",
                 "scenario \"Green\" · features/orders.saffron", "orders id=2", "orders id=3",
             ), box)
             assertNull(ai.saffron.jetbrains.ui.cleanupSummary(report, listOf(a)))
+            // A row a run of named scenarios kept from the last report (ranAt before this run): its rows are not this run's.
+            val folded = com.google.gson.JsonParser.parseString("""{"startedAt":"2026-11-20T10:00:00.000Z","scenarios":[
+                {"feature":"f.saffron","scenario":"Old","ranAt":"2026-11-19T08:30:00.000Z","steps":[],"dbCleanup":["orders id=7"]},
+                {"feature":"f.saffron","scenario":"New","ranAt":"2026-11-20T10:00:01.000Z","steps":[],"dbCleanup":["orders id=8"]}]}""").asJsonObject
+            assertEquals(1, ai.saffron.jetbrains.ui.cleanupSummary(folded, emptyList())!!.first)
+            assertEquals("From the run of 2026-11-19 08:30 UTC: kept from an earlier run, this run did not run this scenario.",
+                ai.saffron.jetbrains.ui.reportStepLines(folded, Gson().fromJson("""{"feature":"f.saffron","scenario":"Old"}""", StatusAttention::class.java)).first())
         } finally {
             root.toFile().deleteRecursively()
         }
@@ -1918,6 +1931,9 @@ class SaffronPluginTest : BasePlatformTestCase() {
         val end = Regex(rule.get("end").asString)
         for (line in listOf("    ```", "    ```json", "```")) assertTrue(line, begin.containsMatchIn(line))
         assertTrue(end.containsMatchIn("    ```"))
+        // ^ holds at a line's start only (Oniguruma, no multiline flag): anchored, the rule opens nothing on a step line holding a ```.
+        assertTrue(rule.get("begin").asString.startsWith("^"))
+        for (line in listOf("    Given I paste ```json into the box", "    Then the page shows ``` and more")) assertFalse(line, begin.containsMatchIn(line))
         assertFalse(end.containsMatchIn("    \"\"\""))
         assertFalse(Regex(repository.getAsJsonObject("docstring").get("end").asString).containsMatchIn("    ```"))
     }
@@ -1930,12 +1946,31 @@ class SaffronPluginTest : BasePlatformTestCase() {
         Files.createDirectories(base)
         val dir = fs.refreshAndFindFileByNioFile(base)!!
         fun create(name: String, directory: Boolean = false) = com.intellij.openapi.vfs.newvfs.events.VFileCreateEvent(null, dir, name, directory, null, null, null)
-        assertTrue(SaffronConfigListener.touchesConfig(base.toString(), listOf(create("saffron.config.json")), folders = false))
-        // A folder only while no Saffron project is known: a run's artifacts folder is no reason to look again.
-        assertTrue(SaffronConfigListener.touchesConfig(base.toString(), listOf(create("e2e", directory = true)), folders = true))
-        assertFalse(SaffronConfigListener.touchesConfig(base.toString(), listOf(create("e2e", directory = true)), folders = false))
-        assertFalse(SaffronConfigListener.touchesConfig(base.toString(), listOf(create("package.json")), folders = true))
-        assertFalse(SaffronConfigListener.touchesConfig("/elsewhere", listOf(create("saffron.config.json")), folders = true))
+        val b = base.toString()
+        val none = emptyList<String>()
+        assertTrue(SaffronConfigListener.touchesConfig(b, listOf(create("saffron.config.json")), none))
+        // A folder only while no Saffron project is known, and never an install or build output.
+        assertTrue(SaffronConfigListener.touchesConfig(b, listOf(create("e2e", directory = true)), none))
+        assertFalse(SaffronConfigListener.touchesConfig(b, listOf(create("e2e", directory = true)), listOf(b)))
+        for (ignored in listOf("node_modules", "build", "out", ".gradle", ".git", "dist", "target")) {
+            assertFalse(ignored, SaffronConfigListener.touchesConfig(b, listOf(create(ignored, directory = true)), none))
+        }
+        Files.createDirectories(base.resolve("node_modules/pkg"))
+        val deep = fs.refreshAndFindFileByNioFile(base.resolve("node_modules/pkg"))!!
+        assertFalse(SaffronConfigListener.touchesConfig(b, listOf(com.intellij.openapi.vfs.newvfs.events.VFileCreateEvent(null, deep, "saffron.config.json", false, null, null, null)), none))
+        assertFalse(SaffronConfigListener.touchesConfig(b, listOf(create("package.json")), none))
+        assertFalse(SaffronConfigListener.touchesConfig("/elsewhere", listOf(create("saffron.config.json")), none))
+        // A save of the config changes nothing discovery reads; its removal does.
+        Files.writeString(base.resolve("saffron.config.json"), "{}")
+        try {
+            val config = fs.refreshAndFindFileByNioFile(base.resolve("saffron.config.json"))!!
+            assertFalse(SaffronConfigListener.touchesConfig(b, listOf(com.intellij.openapi.vfs.newvfs.events.VFileContentChangeEvent(null, config, 0, 1)), listOf(b)))
+            assertTrue(SaffronConfigListener.touchesConfig(b, listOf(com.intellij.openapi.vfs.newvfs.events.VFileDeleteEvent(null, config)), listOf(b)))
+        } finally {
+            Files.deleteIfExists(base.resolve("saffron.config.json"))
+            base.resolve("node_modules").toFile().deleteRecursively()
+            VfsUtil.markDirtyAndRefresh(false, true, true, dir)
+        }
     }
 
     fun `test a saffron config written into the open project registers the tool window`() {
@@ -1947,6 +1982,8 @@ class SaffronPluginTest : BasePlatformTestCase() {
             // The runner stand-in: the status the registration loads never runs npx.
             standInCases(base, "")
             if (manager.getToolWindow("Saffron") != null) manager.unregisterToolWindow("Saffron")
+            val props = com.intellij.ide.util.PropertiesComponent.getInstance(project)
+            props.unsetValue(SaffronStartupActivity.HINT_SHOWN_KEY)
             assertTrue(SaffronStatusService.getInstance(project).discoverRoots().none { Files.exists(it.resolve("saffron.config.json")) })
             // The VFS knows the project folder's children, as an IDE showing the project does: a file added there is an event.
             val dir = com.intellij.openapi.vfs.LocalFileSystem.getInstance().refreshAndFindFileByNioFile(base)!!
@@ -1956,6 +1993,12 @@ class SaffronPluginTest : BasePlatformTestCase() {
             VfsUtil.markDirtyAndRefresh(false, true, true, dir)
             PlatformTestUtil.waitWithEventsDispatching("the tool window was never registered", { manager.getToolWindow("Saffron") != null }, 20)
             assertEquals(listOf(base.toRealPath()), SaffronStatusService.getInstance(project).roots.map { it.toRealPath() })
+            // What opening the project says, said now: no saffron-ai package here.
+            PlatformTestUtil.waitWithEventsDispatching("the install hint was never given", { props.getBoolean(SaffronStartupActivity.HINT_SHOWN_KEY, false) }, 20)
+            // The config removed: the project is found to be gone.
+            Files.delete(base.resolve("saffron.config.json"))
+            VfsUtil.markDirtyAndRefresh(false, true, true, dir)
+            PlatformTestUtil.waitWithEventsDispatching("the removal was never noticed", { SaffronStatusService.getInstance(project).roots.none { Files.exists(it.resolve("saffron.config.json")) } && SaffronStatusService.getInstance(project).roots.isEmpty() }, 20)
         } finally {
             if (manager.getToolWindow("Saffron") != null) manager.unregisterToolWindow("Saffron")
             Files.deleteIfExists(base.resolve("saffron.config.json"))
@@ -1977,9 +2020,34 @@ class SaffronPluginTest : BasePlatformTestCase() {
             val tree = UIUtil.findComponentOfType(tab, Tree::class.java)!!
             fun rows() = (tree.model.root as DefaultMutableTreeNode).children().toList().map { it.toString() }
             PlatformTestUtil.waitWithEventsDispatching("the cleanup row never came: ${'$'}{rows()}", { rows() == listOf("Everything passed: 1 green in the last run", "Database cleanup") }, 60)
+            // An interrupted run that lists nothing names them too.
+            standInCases(base, """  *) echo '{"packageInstalled":true,"lastRun":{"startedAt":"c1","interrupted":true,"notRun":2,"totals":{"scenarios":1,"green":1},"attention":[]}}' ;;""")
+            SaffronStatusService.getInstance(project).refresh()
+            PlatformTestUtil.waitWithEventsDispatching("the interrupted run's cleanup row never came: ${'$'}{rows()}", { rows().firstOrNull()?.startsWith("Run interrupted") == true && rows().last() == "Database cleanup" }, 60)
         } finally {
             base.resolve("node_modules").toFile().deleteRecursively()
             base.resolve(".saffron").toFile().deleteRecursively()
+        }
+    }
+
+    // Review: each listed row scanned every report scenario, on the UI thread, at every render (5,000 red rows froze the
+    // IDE). The report is indexed once, off the UI thread, and each row looked up by key.
+    fun `test Last Run works out a large report's lines once, by key`() {
+        val n = 5000
+        val root = Files.createTempDirectory("saffron-large-report").toRealPath()
+        try {
+            Files.createDirectories(root.resolve(".saffron/reports"))
+            val scenarios = (0 until n).joinToString(",") { """{"feature":"f.saffron","scenario":"S$it","steps":[{"gherkin":"x","dbRows":[{"sql":"SELECT 1","count":1,"rows":[{"n":$it}]}]}]}""" }
+            Files.writeString(root.resolve(".saffron/reports/latest.json"), """{"startedAt":"p1","scenarios":[$scenarios]}""")
+            val attention = (0 until n).map { Gson().fromJson("""{"feature":"f.saffron","scenario":"S$it","status":"red"}""", StatusAttention::class.java) }
+            val started = System.nanoTime()
+            val lines = ai.saffron.jetbrains.ui.reportLines(root, "p1", attention)!!
+            val ms = (System.nanoTime() - started) / 1_000_000
+            assertTrue("$ms ms", ms < 5000)
+            assertEquals(listOf("In \"x\", database: 1 row · SELECT 1", """{"n":4999}"""), lines.linesFor(attention[n - 1]))
+            assertNull(lines.cleanup)
+        } finally {
+            root.toFile().deleteRecursively()
         }
     }
 }

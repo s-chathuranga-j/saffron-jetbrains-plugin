@@ -17,62 +17,55 @@ import java.nio.file.Files
 class SaffronStartupActivity : ProjectActivity {
     override suspend fun execute(project: Project) {
         // Runs off the EDT: fills the roots the language server and run menu read.
-        val roots = SaffronStatusService.getInstance(project).discoverRoots().filter { Files.exists(it.resolve("saffron.config.json")) }
-        if (roots.isEmpty()) return
-
-        // LSP4IJ is an optional dependency: without it the plugin still loads,
-        // but there is no completion, go-to-definition or diagnostics. Say so
-        // once, because nothing else will.
-        if (!lsp4ijAvailable()) {
-            hintOnce(
-                project,
-                LSP_HINT_SHOWN_KEY,
-                "Saffron: install LSP4IJ for completion, diagnostics and Run lenses",
-                "Highlighting, run configurations and the Saffron tool window work already, and right-click Run " +
-                    "inside a scenario runs that scenario alone. Step completion, StepSet go-to-definition, hover, " +
-                    "diagnostics and the Run lenses above each scenario come from the language server, which needs " +
-                    "the free <b>LSP4IJ</b> plugin (Settings, Plugins, Marketplace). " +
-                    "If LSP4IJ is not available for this IDE build yet, they start working once it is.",
-            )
-            return
-        }
-        if (roots.none { SaffronCommand.installedPackage(it.toString(), project.basePath) != null }) {
-            hintOnce(
-                project,
-                HINT_SHOWN_KEY,
-                "Saffron: install the runner in this project",
-                INSTALL_HINT,
-            )
-        }
+        hints(project, SaffronStatusService.getInstance(project).discoverRoots())
     }
 
-    /**
-     * Whether LSP4IJ is installed AND enabled, asked the way that needs no
-     * plugin-manager API (those are internal or deprecated from 2026.2): an
-     * optional dependency's classes are visible to this plugin's class loader
-     * exactly when that dependency is loaded.
-     */
-    private fun lsp4ijAvailable(): Boolean =
-        try {
-            Class.forName("com.redhat.devtools.lsp4ij.LanguageServerFactory", false, javaClass.classLoader)
-            true
-        } catch (_: Throwable) {
-            false
-        }
-
-    private fun hintOnce(project: Project, key: String, title: String, body: String) {
-        val props = PropertiesComponent.getInstance(project)
-        if (props.getBoolean(key, false)) return
-        props.setValue(key, true)
-        NotificationGroupManager.getInstance()
-            .getNotificationGroup("Saffron")
-            .createNotification(title, body, NotificationType.INFORMATION)
-            .notify(project)
-    }
-
-    private companion object {
+    internal companion object {
         const val HINT_SHOWN_KEY = "ai.saffron.jetbrains.installHintShown"
         const val LSP_HINT_SHOWN_KEY = "ai.saffron.jetbrains.lsp4ijHintShown"
+
+        /**
+         * Whether LSP4IJ is installed AND enabled, asked the way that needs no
+         * plugin-manager API (those are internal or deprecated from 2026.2): an
+         * optional dependency's classes are visible to this plugin's class loader
+         * exactly when that dependency is loaded.
+         */
+        private fun lsp4ijAvailable(): Boolean =
+            try {
+                Class.forName("com.redhat.devtools.lsp4ij.LanguageServerFactory", false, SaffronStartupActivity::class.java.classLoader)
+                true
+            } catch (_: Throwable) {
+                false
+            }
+
+        private fun hintOnce(project: Project, key: String, title: String, body: String) {
+            val props = PropertiesComponent.getInstance(project)
+            if (props.getBoolean(key, false)) return
+            props.setValue(key, true)
+            NotificationGroupManager.getInstance()
+                .getNotificationGroup("Saffron")
+                .createNotification(title, body, NotificationType.INFORMATION)
+                .notify(project)
+        }
+
+        /**
+         * The hints for the Saffron projects [discovered] (each once per project): LSP4IJ missing, else the runner not
+         * installed. At open, and when a project appears while it is open (SAF-207). Reads the disk: off the EDT.
+         */
+        fun hints(project: Project, discovered: List<java.nio.file.Path>) {
+            val roots = discovered.filter { Files.exists(it.resolve("saffron.config.json")) }
+            if (roots.isEmpty()) return
+            // LSP4IJ is an optional dependency: without it the plugin still loads,
+            // but there is no completion, go-to-definition or diagnostics. Say so
+            // once, because nothing else will.
+            if (!lsp4ijAvailable()) {
+                hintOnce(project, LSP_HINT_SHOWN_KEY, "Saffron: install LSP4IJ for completion, diagnostics and Run lenses", LSP_HINT)
+                return
+            }
+            if (roots.none { SaffronCommand.installedPackage(it.toString(), project.basePath) != null }) {
+                hintOnce(project, HINT_SHOWN_KEY, "Saffron: install the runner in this project", INSTALL_HINT)
+            }
+        }
     }
 }
 
@@ -84,3 +77,11 @@ internal const val INSTALL_HINT =
     "This project has a saffron.config.json but no saffron-ai package. Run <code>npm i -D saffron-ai</code>. " +
         "Highlighting works already. Until then, in a trusted project, the language server runs through " +
         "<code>npx</code>, which downloads saffron-ai the first time; in an untrusted project it does not start."
+
+/** Said once when LSP4IJ is missing: what works without it, and what it brings. */
+internal const val LSP_HINT =
+    "Highlighting, run configurations and the Saffron tool window work already, and right-click Run " +
+        "inside a scenario runs that scenario alone. Step completion, StepSet go-to-definition, hover, " +
+        "diagnostics and the Run lenses above each scenario come from the language server, which needs " +
+        "the free <b>LSP4IJ</b> plugin (Settings, Plugins, Marketplace). " +
+        "If LSP4IJ is not available for this IDE build yet, they start working once it is."

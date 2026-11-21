@@ -407,7 +407,14 @@ class SaffronStatusService(private val project: Project) : Disposable {
         rootsAlarm.addRequest({
             val before = roots
             val found = discoverRoots()
-            if (found.isEmpty() || project.isDisposed) return@addRequest
+            if (project.isDisposed) return@addRequest
+            // The last Saffron project gone: the tabs and the run menu stop showing its status.
+            if (found.isEmpty()) {
+                if (before.isNotEmpty()) refresh()
+                return@addRequest
+            }
+            // What opening the project would have said (LSP4IJ missing, the runner not installed), once per project.
+            if (found != before) ai.saffron.jetbrains.SaffronStartupActivity.hints(project, found)
             // Once the tool window manager has registered the declared tool windows: never a second "Saffron" beside it.
             val manager = com.intellij.openapi.wm.ToolWindowManager.getInstance(project)
             val follow = Runnable {

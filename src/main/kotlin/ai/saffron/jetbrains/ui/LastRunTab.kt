@@ -127,26 +127,40 @@ private fun text(e: JsonElement?): String? = e?.takeIf { it.isJsonPrimitive }?.a
 private fun objects(e: JsonElement?): List<JsonObject> = e?.takeIf { it.isJsonArray }?.asJsonArray?.filter { it.isJsonObject }?.map { it.asJsonObject } ?: emptyList()
 private fun texts(e: JsonElement?): List<String> = e?.takeIf { it.isJsonArray }?.asJsonArray?.mapNotNull(::text) ?: emptyList()
 
-/** The report's scenario named by [feature], [scenario] and [browser], as a Last Run row names it; null when none. */
-private fun reportScenario(report: JsonObject?, a: StatusAttention): JsonObject? = objects(report?.get("scenarios")).firstOrNull { lists(a, it) }
+/** The key a report scenario and a Last Run row share: feature (forward slashes), display name, browser. */
+private fun scenarioKey(feature: String?, scenario: String?, browser: String?) = "${feature.orEmpty().replace('\\', '/')}\n${scenario.orEmpty()}\n${browser.orEmpty()}"
+private fun keyOf(a: StatusAttention) = scenarioKey(a.feature, a.scenario, a.browser)
+private fun keyOf(s: JsonObject) = scenarioKey(text(s.get("feature")), text(s.get("scenario")), text(s.get("browser")))
 
-/** Whether the Last Run row [a] is the report's scenario [s]. */
-private fun lists(a: StatusAttention, s: JsonObject): Boolean =
-    text(s.get("feature"))?.replace('\\', '/') == a.feature.replace('\\', '/') && text(s.get("scenario")) == a.scenario && text(s.get("browser")) == a.browser
+/** The report's scenarios by key, indexed once, the first of a key winning. */
+private fun scenariosByKey(report: JsonObject): Map<String, JsonObject> =
+    LinkedHashMap<String, JsonObject>().also { m -> for (s in objects(report.get("scenarios"))) m.putIfAbsent(keyOf(s), s) }
 
-/** The runner's cleanupPanel words (src/report/html.ts): rows database cleanup could not undo, named to remove by hand. */
-private fun cleanupLines(rows: List<String>): List<String> =
-    if (rows.isEmpty()) emptyList()
-    else listOf("Database cleanup could not undo ${rows.size} row${if (rows.size == 1) "" else "s"} this scenario wrote: remove ${if (rows.size == 1) "it" else "them"} by hand. The verdict stands.") + rows
+private fun instant(e: JsonElement?): java.time.Instant? = text(e)?.let { runCatching { java.time.Instant.parse(it) }.getOrNull() }
 
 /**
- * What a run report keeps about a Last Run row beyond status, as plain lines, in the runner's report's words
+ * A scenario a run of named scenarios kept from the last report (the runner's foldIntoRun): run before this run
+ * started, as the runner's report tells it apart ("from the run of ..."). Its rows are not this run's.
+ */
+private fun keptFromEarlier(report: JsonObject, s: JsonObject): Boolean {
+    val ran = instant(s.get("ranAt")) ?: return false
+    val started = instant(report.get("startedAt")) ?: return false
+    return ran.isBefore(started)
+}
+
+/** The runner's cleanupPanel (src/report/html.ts): rows database cleanup could not undo, named to remove by hand. */
+private fun cleanupLines(rows: List<String>): List<String> =
+    if (rows.isEmpty()) emptyList()
+    else listOf("database cleanup", "Cleanup could not undo ${rows.size} row${if (rows.size == 1) "" else "s"} this scenario wrote: remove ${if (rows.size == 1) "it" else "them"} by hand. The verdict stands.") + rows
+
+/**
+ * What a run report keeps about one of its scenarios beyond status, as plain lines, in the runner's report's words
  * (src/report/html.ts): the rows each database check found (`dbRows` on a step result: the database it ran on, the
  * count, the statement, the first rows, masked as the runner kept them), then the rows cleanup could not undo
- * (`dbCleanup`). The report may be an imported CI run's: read as untrusted, every value as text.
+ * (`dbCleanup`), under "from the run of ..." for one kept from an earlier run. The report may be an imported CI
+ * run's: read as untrusted, every value as text.
  */
-internal fun reportStepLines(report: JsonObject?, a: StatusAttention): List<String> {
-    val scenario = reportScenario(report, a) ?: return emptyList()
+private fun scenarioLines(report: JsonObject, scenario: JsonObject): List<String> {
     val checks = objects(scenario.get("steps")).flatMap { step ->
         objects(step.get("dbRows")).flatMap { c ->
             val count = c.get("count")?.takeIf { it.isJsonPrimitive && it.asJsonPrimitive.isNumber }?.asInt ?: 0
@@ -159,27 +173,52 @@ internal fun reportStepLines(report: JsonObject?, a: StatusAttention): List<Stri
                 (if (count > rows.size) listOf("... ${count - rows.size} more") else emptyList())
         }
     }
-    return checks + cleanupLines(texts(scenario.get("dbCleanup")))
+    val lines = checks + cleanupLines(texts(scenario.get("dbCleanup")))
+    if (lines.isEmpty() || !keptFromEarlier(report, scenario)) return lines
+    val ran = instant(scenario.get("ranAt"))!!.toString().replace("T", " ").take(16)
+    return listOf("From the run of $ran UTC: kept from an earlier run, this run did not run this scenario.") + lines
+}
+
+/** [scenarioLines] for the report's scenario a Last Run row lists; none when the report has no such scenario. */
+internal fun reportStepLines(report: JsonObject?, a: StatusAttention): List<String> {
+    report ?: return emptyList()
+    return scenariosByKey(report)[keyOf(a)]?.let { scenarioLines(report, it) } ?: emptyList()
 }
 
 /**
- * The rows cleanup could not undo that no listed row shows, as one row's count and tooltip lines: the run's own (a
- * Fixture's, kept for its feature's scenarios until the run ended, the report's top-level `dbCleanup`), and those of
- * scenarios status does not list (a green one's). Null when there are none.
+ * The rows cleanup could not undo that no listed row shows, this run's only, as one row's count and tooltip lines:
+ * the run's own (a Fixture's, kept for its feature's scenarios until the run ended, the report's top-level
+ * `dbCleanup`), and those of scenarios this run ran that status does not list (a green one's). Null when none.
  */
-internal fun cleanupSummary(report: JsonObject?, attention: List<StatusAttention>): Pair<Int, List<String>>? {
-    report ?: return null
+internal fun cleanupSummary(report: JsonObject?, attention: List<StatusAttention>): Pair<Int, List<String>>? =
+    report?.let { cleanupSummary(it, scenariosByKey(it), attention.mapTo(HashSet(), ::keyOf)) }
+
+private fun cleanupSummary(report: JsonObject, byKey: Map<String, JsonObject>, listed: Set<String>): Pair<Int, List<String>>? {
     class Group(val fixture: Boolean, val feature: String, val scenario: String, val rows: List<String>)
     val groups = objects(report.get("dbCleanup")).map { c -> Group(c.get("fixture")?.takeIf { it.isJsonPrimitive && it.asJsonPrimitive.isBoolean }?.asBoolean == true, text(c.get("feature")).orEmpty(), text(c.get("scenario")).orEmpty(), texts(c.get("rows"))) } +
-        objects(report.get("scenarios")).filter { s -> attention.none { a -> lists(a, s) } }
+        byKey.values.filter { s -> s.get("dbCleanup")?.isJsonArray == true && keyOf(s) !in listed && !keptFromEarlier(report, s) }
             .map { s -> Group(false, text(s.get("feature")).orEmpty(), text(s.get("scenario")).orEmpty(), texts(s.get("dbCleanup"))) }
     val kept = groups.filter { it.rows.isNotEmpty() }
     val count = kept.sumOf { it.rows.size }
     if (count == 0) return null
-    return count to (listOf("Cleanup could not undo these rows: remove them by hand. The verdicts stand.") + kept.flatMap { g ->
+    return count to (listOf("database cleanup", "Cleanup could not undo these rows: remove them by hand. The verdicts stand.") + kept.flatMap { g ->
         listOf("${if (g.fixture) "fixture" else "scenario"} \"${g.scenario}\" · ${g.feature}") +
             (if (g.fixture) listOf("Its rows were the feature's, kept for its scenarios until the run ended.") else emptyList()) + g.rows
     })
+}
+
+/** What Last Run takes from the run's report, worked out off the UI thread: each listed row's lines by key, the cleanup row, the teardown. */
+internal class ReportLines(val byRow: Map<String, List<String>>, val cleanup: Pair<Int, List<String>>?, val teardownFailed: Boolean) {
+    fun linesFor(a: StatusAttention): List<String> = byRow[keyOf(a)].orEmpty()
+}
+
+/** The run's report read and worked out for [attention], once: null when the report is not that run's. Reads the disk. */
+internal fun reportLines(base: java.nio.file.Path, startedAt: String, attention: List<StatusAttention>): ReportLines? {
+    val report = runReport(base, startedAt) ?: return null
+    val byKey = scenariosByKey(report)
+    val listed = attention.mapTo(HashSet(), ::keyOf)
+    val byRow = listed.mapNotNull { key -> byKey[key]?.let { s -> scenarioLines(report, s).takeIf { it.isNotEmpty() }?.let { key to it } } }.toMap()
+    return ReportLines(byRow, cleanupSummary(report, byKey, listed), teardownFailed(report))
 }
 
 private class RunRow(
@@ -301,18 +340,20 @@ class LastRunTab(project: Project, parent: Disposable) : StatusTab(project, pare
         // not undo, in a row of their own when no listed row shows them.
         if (run != null && attention != null && !started.isNullOrBlank()) {
             val base = projectRoot
-            offUiThread(project, alive, { runReport(base, started) }) { report ->
+            offUiThread(project, alive, { reportLines(base, started, attention) }) { report ->
                 if (report == null || rendered !== status) return@offUiThread
-                if (attention.isEmpty() && !run.interrupted && teardownFailed(report)) tree.emptyText.text = lastRunEmptyText(status, teardownFailed = true)
-                for (node in root.depthFirstEnumeration().toList()) {
-                    val r = (node as? DefaultMutableTreeNode)?.userObject as? RunRow ?: continue
-                    val a = r.attention ?: continue
-                    reportStepLines(report, a).takeIf { it.isNotEmpty() }?.let { r.tooltip = attentionTooltip(a, screenshotOf(a.evidence) != null, it) }
+                if (attention.isEmpty() && !run.interrupted && report.teardownFailed) tree.emptyText.text = lastRunEmptyText(status, teardownFailed = true)
+                if (report.byRow.isNotEmpty()) {
+                    for (node in root.depthFirstEnumeration().toList()) {
+                        val r = (node as? DefaultMutableTreeNode)?.userObject as? RunRow ?: continue
+                        val a = r.attention ?: continue
+                        report.linesFor(a).takeIf { it.isNotEmpty() }?.let { r.tooltip = attentionTooltip(a, screenshotOf(a.evidence) != null, it) }
+                    }
                 }
-                cleanupSummary(report, attention)?.let { (count, lines) ->
-                    // An all-green run lists nothing: what the empty tree said stays said above the row.
-                    // Inserted, not reloaded: the row selected stays selected.
-                    if (root.childCount == 0) model.insertNodeInto(DefaultMutableTreeNode(RunRow(tree.emptyText.text, "", AllIcons.General.InspectionsOK)), root, 0)
+                report.cleanup?.let { (count, lines) ->
+                    // A run that lists nothing (all green, interrupted, teardown failed): what the empty tree said stays said
+                    // above the row. Inserted, not reloaded: the row selected stays selected.
+                    if (root.childCount == 0) model.insertNodeInto(DefaultMutableTreeNode(RunRow(tree.emptyText.text, "", AllIcons.General.Warning)), root, 0)
                     model.insertNodeInto(DefaultMutableTreeNode(RunRow("Database cleanup", "$count row${if (count == 1) "" else "s"} left", AllIcons.General.Warning, tooltipHtml(*lines.toTypedArray()))), root, root.childCount)
                     tree.expandPath(TreePath(root.path))
                 }

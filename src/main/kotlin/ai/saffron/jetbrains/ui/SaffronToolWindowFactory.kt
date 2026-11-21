@@ -61,6 +61,8 @@ internal fun ensureToolWindow(project: Project) {
         icon = ai.saffron.jetbrains.SaffronIcons.TOOL_WINDOW
         stripeTitle = java.util.function.Supplier { TOOL_WINDOW_ID }
         contentFactory = SaffronToolWindowFactory()
+        // As plugin.xml declares it: the tabs are the tool window's, not closable.
+        canCloseContent = false
     }
 }
 
