@@ -1,3 +1,10 @@
+<h3>0.8.5</h3>
+<ul>
+  <li>A <code>db</code> setting in <code>saffron.config.json</code> that saffron-ai 1.4.4 refuses (one database, <code>db.databases</code>, <code>redactColumns</code>) is marked on the Files tab, in saffron-ai's words.</li>
+  <li>Last Run tooltips show the rows each database check found (database, count, statement, first rows) and the rows database cleanup could not undo; a "Database cleanup" row lists a Fixture's leftover rows, and those of scenarios the panel does not list.</li>
+  <li><code>```</code> doc strings are coloured like <code>"""</code> ones.</li>
+  <li>The Saffron tool window and language server appear once a <code>saffron.config.json</code> is added to the open project (<code>saffron init</code>), without reopening it.</li>
+</ul>
 <h3>0.8.4</h3>
 <ul>
   <li>After a run whose scenarios all passed and whose teardown failed, the Last Run tab says "Teardown failed: the scenarios passed; check for processes or containers left running" instead of "Everything passed", and the Files tab's last run line ends "teardown failed". The runner exits 2 for such a run.</li>
