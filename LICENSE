@@ -1,5 +1,5 @@
 Saffron Free Use License
-Version 1.0, July 2026
+Version 1.1, November 2026
 
 Copyright (c) 2026 Chathuranga Jayasinghe. All rights reserved.
 
@@ -19,29 +19,41 @@ Copyright (c) 2026 Chathuranga Jayasinghe. All rights reserved.
    other artifacts the software produces from your inputs are yours.
    This license claims no rights over them.
 
-4. Third-party components. The software depends on third-party
+4. Files for your project. Despite Sections 2(a) and 2(b), you may use,
+   copy, modify, and distribute: (i) the agent skill files that come
+   with the software (its "skills" folder), and the instruction text,
+   configuration entries, and example files that "saffron init" adds to
+   your project; and (ii) the helper and configuration files that
+   "saffron eject" writes along with the tests it exports, including its
+   copies of parts of the software's code, but only as part of the
+   project they were written into. This also covers the same files from
+   earlier versions of the software. It does not cover any other part of
+   the software.
+
+5. Third-party components. The software depends on third-party
    packages that are licensed under their own terms; nothing in this
    license limits your rights under those terms.
 
-5. AI usage costs. The software can invoke AI services using
+6. AI usage costs. The software can invoke AI services using
    credentials you configure. You are responsible for those accounts
    and any charges they incur.
 
-6. Ownership. The software is licensed, not sold. All rights not
+7. Ownership. The software is licensed, not sold. All rights not
    expressly granted are reserved.
 
-7. Future versions. Future versions may be offered under different
+8. Future versions. Future versions may be offered under different
    terms, including open-source licenses.
 
-8. No warranty. THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF
-   ANY KIND, EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE
-   WARRANTIES OF MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE AND
-   NONINFRINGEMENT.
+9. No warranty. YOU RECEIVE THE SOFTWARE "AS IS". TO THE EXTENT
+   APPLICABLE LAW ALLOWS, THE AUTHOR MAKES NO WARRANTY ABOUT IT, WHETHER
+   EXPRESS OR IMPLIED, AND IN PARTICULAR NONE OF MERCHANTABILITY,
+   FITNESS FOR A PARTICULAR PURPOSE, OR NONINFRINGEMENT.
 
-9. Limitation of liability. IN NO EVENT SHALL THE AUTHOR BE LIABLE FOR
-   ANY CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER IN AN ACTION OF
-   CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION
-   WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
+10. Limitation of liability. TO THE EXTENT APPLICABLE LAW ALLOWS, THE
+    AUTHOR WILL NOT BE LIABLE, ON ANY CLAIM, FOR DAMAGES OR ANY OTHER
+    LIABILITY THAT ARISES FROM OR RELATES TO THE SOFTWARE, ITS USE, OR
+    ANY OTHER DEALINGS IN IT, WHETHER THE CLAIM IS BASED IN CONTRACT,
+    TORT, OR ANY OTHER THEORY.
 
-10. Termination. This license terminates automatically if you breach
+11. Termination. This license terminates automatically if you breach
     it. On termination you must stop using the software.
