@@ -51,6 +51,16 @@ class SaffronRunConfiguration(project: Project, factory: ConfigurationFactory, n
         get() = options.extraArgs ?: ""
         set(value) { options.extraArgs = value }
 
+    /** The scenario a `file:LINE` target runs, by name, so its line is found again at launch (null when blank). */
+    var scenario: String?
+        get() = options.scenario
+        set(value) { options.scenario = value }
+
+    /** The [scenario]'s place among the file's scenarios of that name; -1 when the target is no by-line scenario. */
+    var scenarioIndex: Int
+        get() = options.scenarioIndex
+        set(value) { options.scenarioIndex = value }
+
     /** Null when blank: the IDE project directory. */
     var workingDirectory: String?
         get() = options.workingDirectory?.takeIf { it.isNotBlank() }

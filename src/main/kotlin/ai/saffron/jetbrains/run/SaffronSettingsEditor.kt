@@ -73,6 +73,8 @@ class SaffronSettingsEditor : SettingsEditor<SaffronRunConfiguration>() {
 
     override fun applyEditorTo(c: SaffronRunConfiguration) {
         c.command = command.selectedItem as String
+        // Paths typed by hand target what they say: a stored scenario would move a typed line to it at launch.
+        if (paths.text.trim() != c.paths) c.scenarioIndex = -1
         c.paths = paths.text.trim()
         c.tags = tags.text.trim()
         c.replayOnly = replayOnly.isSelected

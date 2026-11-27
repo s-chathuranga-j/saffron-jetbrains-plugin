@@ -5,6 +5,9 @@ import ai.saffron.jetbrains.ui.runnerAtLeast
 import com.intellij.execution.RunnerAndConfigurationSettings
 import com.intellij.openapi.project.Project
 import com.intellij.openapi.util.io.FileUtil
+import com.intellij.execution.ExecutionException
+import java.nio.file.Files
+import java.nio.file.Path
 
 /**
  * One scenario run alone: `saffron run <file>:<scenario name>`, by name so
@@ -36,7 +39,7 @@ object SaffronScenarioRun {
      * name of its own: rewriting that one's configuration would change what
      * its Run tab reruns.
      */
-    fun configuration(project: Project, root: String, target: String, scenario: String, mode: String): RunnerAndConfigurationSettings {
+    fun configuration(project: Project, root: String, target: String, scenario: String, mode: String, index: Int = 0): RunnerAndConfigurationSettings {
         val dir = FileUtil.toSystemIndependentName(root)
         val paths = SaffronCommand.joinPaths(listOf(target))
         val file = fileOf(target)
@@ -53,6 +56,11 @@ object SaffronScenarioRun {
             it.paths = paths
             it.replayOnly = mode == "replay"
             it.headed = mode == "headed"
+            // A by-line target is found again from its scenario's name and place at launch (refreshByLine).
+            if (lineOf(target) != null) {
+                it.scenario = scenario
+                it.scenarioIndex = index
+            }
         }
     }
 
@@ -62,7 +70,42 @@ object SaffronScenarioRun {
      * selector takes the first.
      */
     fun target(file: String, name: String, line: Int, twice: Boolean = false): String =
-        if (name.isNotBlank() && !LINES.matches(name) && !twice) "$file:$name" else "$file:$line"
+        if (!byLine(name, twice)) "$file:$name" else "$file:$line"
+
+    /** Whether [target] runs a scenario of this name by its line. */
+    fun byLine(name: String, twice: Boolean): Boolean = name.isBlank() || LINES.matches(name) || twice
+
+    /** The place (0-based) of the scenario named [name] at 1-based [line] among the scenarios of [text] with that name. */
+    fun indexAt(text: CharSequence, name: String, line: Int): Int =
+        text.lines().let { lines -> headings(lines, lines.size - 1).count { it.second == name && it.first + 1 < line } }
+
+    /** The line of a `file:LINE` target; null for a file, or a scenario by name (one ending `10:30` included). */
+    private fun lineOf(target: String): Int? = fileOf(target).takeIf { it != target }?.let { target.removePrefix("$it:").toIntOrNull() }
+
+    /** [indexAt] for a `file:LINE` [target] under [root], from the file on disk; 0 for any other target. Reads the disk. */
+    fun indexOnDisk(root: String, target: String, name: String): Int {
+        val line = lineOf(target) ?: return 0
+        val text = runCatching { String(Files.readAllBytes(Path.of(root).resolve(fileOf(target))), Charsets.UTF_8) }.getOrNull() ?: return 0
+        return indexAt(text, name, line)
+    }
+
+    /**
+     * A by-line target rebuilt where its scenario is now, from the file on disk the runner reads: the [c]'s stored
+     * scenario name and place among that name's. Its stored line went stale with any edit above it, and would run
+     * another block under this one's name. Unchanged for a configuration that stores no scenario (a by-name target,
+     * or one saved before 0.8.6), or a file that cannot be read (the runner says why). Reads the disk.
+     */
+    fun refreshByLine(c: SaffronRunConfiguration) {
+        if (c.scenarioIndex < 0) return
+        val name = c.scenario.orEmpty()
+        val target = SaffronCommand.splitPaths(c.paths).singleOrNull() ?: return
+        val file = fileOf(target).takeIf { it != target } ?: return
+        val dir = c.resolvedWorkingDirectory ?: return
+        val text = runCatching { String(Files.readAllBytes(Path.of(dir).resolve(file)), Charsets.UTF_8) }.getOrNull() ?: return
+        val line = text.lines().let { lines -> headings(lines, lines.size - 1).filter { it.second == name }.getOrNull(c.scenarioIndex)?.first }
+            ?: throw ExecutionException("Scenario '$name' is no longer in $file: run it again from the editor.")
+        c.paths = SaffronCommand.joinPaths(listOf("$file:${line + 1}"))
+    }
 
     /** The runner's own rule for the part after the file: digits, colon-separated, are lines. */
     private val LINES = Regex("\\d+(:\\d+)*")

@@ -115,8 +115,11 @@ class OrphansTab(project: Project, parent: Disposable) : StatusTab(project, pare
             root.add(DefaultMutableTreeNode(OrphanRow(unknown!!, icon = AllIcons.General.Warning, tooltip = unknown)))
         }
         tree.emptyText.text = unknown ?: "Every recording belongs to a scenario"
-        for ((kind, label) in listOf("cache" to "Caches", "proposal" to "Pending proposals", "artifact" to "Screenshot folders")) {
-            val group = orphans.filter { it.kind == kind }
+        // A StepSet's own recording (saffron-ai's "step-set"), and any kind this plugin does not know: Remove All deletes
+        // what the runner lists, so every one is shown.
+        val kinds = listOf("cache" to "Caches", "proposal" to "Pending proposals", "artifact" to "Screenshot folders", "step-set" to "StepSet recordings")
+        for ((kind, label) in kinds + (null to "Other recordings")) {
+            val group = orphans.filter { o -> if (kind != null) o.kind == kind else kinds.none { it.first == o.kind } }
             if (group.isEmpty()) continue
             val parent = DefaultMutableTreeNode(OrphanRow(label, "${group.size}", AllIcons.Nodes.Folder))
             for (o in group) parent.add(DefaultMutableTreeNode(row(o, why(o.reason))))
@@ -136,6 +139,10 @@ class OrphansTab(project: Project, parent: Disposable) : StatusTab(project, pare
         if (o.kind == "artifact") {
             // A folder of pictures: nothing to open as a file.
             OrphanRow(o.file.split('/').takeLast(2).joinToString("/"), "failure screenshots of a scenario that is gone", AllIcons.FileTypes.Image, o.file)
+        } else if (o.kind == "step-set") {
+            // The runner's describeOrphan words.
+            val gone = "no StepSet of that name is defined any more"
+            OrphanRow(o.scenario?.removePrefix("StepSet: ") ?: o.file.substringAfterLast('/'), gone, AllIcons.General.Warning, tooltipHtml(o.file, gone, "Double-click to open the recording."), o.file)
         } else {
             OrphanRow(
                 o.scenario ?: o.file.substringAfterLast('/'),

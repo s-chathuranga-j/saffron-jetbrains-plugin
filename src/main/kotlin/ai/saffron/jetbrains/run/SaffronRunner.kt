@@ -64,6 +64,8 @@ object SaffronRunner {
         c.headed = false
         c.rerecord = false
         c.extraArgs = ""
+        c.scenario = null
+        c.scenarioIndex = -1
         c.workingDirectory = SaffronStatusService.getInstance(project).root.toString()
         configure(c)
         // An accept, reject, export or eject is never the selected configuration: the Run button would repeat it on

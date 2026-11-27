@@ -250,7 +250,13 @@ class StatusLastRun(
     /** Set when Ctrl-C (or the Stop button) cut the run short: [notRun] of its scenarios did not run, and count as neither passed nor failed. */
     val interrupted: Boolean = false,
     val notRun: Int? = null,
+    /** This run's own counts in the runner's words, never rows kept from earlier runs; absent from older runners. */
+    val counts: String? = null,
+    /** Set when a run of named scenarios was folded into the earlier report: its earlier rows, and the counts of every row. */
+    val combined: StatusCombined? = null,
 )
+
+class StatusCombined(val earlierRows: Int = 0, val counts: String = "")
 
 /** [passRate]: the runner's, where a heal whose proof failed does not pass; null from a runner before 0.9.8. */
 class StatusHistoryRun(val startedAt: String = "", val green: Int = 0, val yellow: Int = 0, val red: Int = 0, val passRate: Int? = null, val aiCalls: Int = 0, val costUsd: Double? = null)

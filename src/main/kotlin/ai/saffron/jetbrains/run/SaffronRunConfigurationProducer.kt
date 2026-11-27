@@ -39,7 +39,16 @@ class SaffronRunConfigurationProducer : LazyRunConfigurationProducer<SaffronRunC
         configuration.command = "run"
         configuration.workingDirectory = root
         configuration.paths = SaffronCommand.joinPaths(paths(root, target, scenario))
-        configuration.name = scenario?.let { SaffronScenarioRun.name(it.first, "run") } ?: "Run ${target.name}"
+        // A plain run: none of the template's switches or arguments carry in, as SaffronRunner.prepare resets a lens's.
+        configuration.tags = ""
+        configuration.replayOnly = false
+        configuration.headed = false
+        configuration.rerecord = false
+        configuration.extraArgs = ""
+        // A by-line target is found again from its scenario's name and place among that name's at launch.
+        configuration.scenario = scenario?.takeIf { it.byLine }?.name
+        configuration.scenarioIndex = scenario?.takeIf { it.byLine }?.index ?: -1
+        configuration.name = scenario?.let { SaffronScenarioRun.name(it.name, "run") } ?: "Run ${target.name}"
         return true
     }
 
@@ -47,12 +56,20 @@ class SaffronRunConfigurationProducer : LazyRunConfigurationProducer<SaffronRunC
         val (target, root) = target(context) ?: return false
         // A blank directory (0.3.2 and earlier) is the project directory.
         val dir = configuration.resolvedWorkingDirectory?.let(FileUtil::toSystemIndependentName)
+        val scenario = scenarioAtCaret(context, root, target)
+        val samePaths = if (configuration.scenarioIndex >= 0 || scenario?.byLine == true) {
+            // By line: the same file and the same scenario (name and place), never a line another scenario now holds.
+            configuration.scenario.orEmpty() == scenario?.name && configuration.scenarioIndex == scenario?.index &&
+                SaffronCommand.splitPaths(configuration.paths).map(SaffronScenarioRun::fileOf) == relativePaths(root, target)
+        } else {
+            SaffronCommand.splitPaths(configuration.paths) == paths(root, target, scenario)
+        }
         return configuration.command == "run" &&
             dir == root &&
-            SaffronCommand.splitPaths(configuration.paths) == paths(root, target, scenarioAtCaret(context, root, target)) &&
+            samePaths &&
             configuration.tags.isBlank() &&
-            // Right-click Run is a plain run: not a lens's Replay only or Headed configuration, nor a re-record.
-            !configuration.replayOnly && !configuration.headed && !configuration.rerecord
+            // Right-click Run is a plain run: not a lens's Replay only or Headed configuration, a re-record, or one with arguments of its own.
+            !configuration.replayOnly && !configuration.headed && !configuration.rerecord && configuration.extraArgs.isBlank()
     }
 
     /**
@@ -88,20 +105,25 @@ class SaffronRunConfigurationProducer : LazyRunConfigurationProducer<SaffronRunC
     }
 
     /** The target's paths, or the one scenario's `file:name` (`file:line` for a name the file has twice). */
-    private fun paths(root: String, target: VirtualFile, scenario: Triple<String, Int, Boolean>?): List<String> =
-        scenario?.let { (name, line, twice) -> relativePaths(root, target).map { SaffronScenarioRun.target(it, name, line, twice) } } ?: relativePaths(root, target)
+    private fun paths(root: String, target: VirtualFile, scenario: Caret?): List<String> =
+        scenario?.let { s -> relativePaths(root, target).map { SaffronScenarioRun.target(it, s.name, s.line, s.twice) } } ?: relativePaths(root, target)
+
+    /** The scenario at the caret: its name, 1-based line, whether another has its name, and its place among those of its name. */
+    private class Caret(val name: String, val line: Int, val twice: Boolean, val index: Int) {
+        /** Run by its line: the runner would read the name as lines, or take the first of its name. */
+        val byLine: Boolean get() = SaffronScenarioRun.byLine(name, twice)
+    }
 
     /**
-     * The scenario at the editor's caret (name, line, and whether another scenario has its name),
-     * when the context is that file's editor and the runner takes scenario targets.
+     * The scenario at the editor's caret, when the context is that file's editor and the runner takes scenario targets.
      */
-    private fun scenarioAtCaret(context: ConfigurationContext, root: String, target: VirtualFile): Triple<String, Int, Boolean>? {
+    private fun scenarioAtCaret(context: ConfigurationContext, root: String, target: VirtualFile): Caret? {
         if (target.isDirectory) return null
         val editor = CommonDataKeys.EDITOR.getData(context.dataContext) ?: return null
         if (FileDocumentManager.getInstance().getFile(editor.document) != target) return null
         val text = editor.document.immutableCharSequence
         val (name, line) = SaffronScenarioRun.scenarioAt(text, editor.caretModel.logicalPosition.line) ?: return null
-        return Triple(name, line, SaffronScenarioRun.named(text, name) > 1).takeIf { SaffronScenarioRun.runnerRunsScenarios(root) }
+        return Caret(name, line, SaffronScenarioRun.named(text, name) > 1, SaffronScenarioRun.indexAt(text, name, line)).takeIf { SaffronScenarioRun.runnerRunsScenarios(root) }
     }
 
     /** The target relative to the root; nothing when it IS the root (blank runs every feature file there). */

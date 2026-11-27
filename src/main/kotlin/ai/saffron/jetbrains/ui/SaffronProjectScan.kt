@@ -40,12 +40,15 @@ data class LastRun(
     val blocked: Int = 0,
     /** The teardown failed: the runner exits 2 for the run, even when every scenario passed. */
     val teardownFailed: Boolean = false,
+    /** Rows a run of named scenarios kept from earlier runs: the counts above are this run's alone. */
+    val earlierRows: Int = 0,
 ) {
     /** The panel's line: an interrupted run never reads as a finished one. */
     fun summary(ago: String): String {
         val cost = costUsd?.let { "$" + "%.2f".format(it) } ?: "cost not reported"
         val stopped = if (interrupted) "Run interrupted (${notRun ?: "some"} not run): " else "Last run: "
-        return "$stopped$green passed · $yellow pending review · ${failedCount(red, blocked)} · $cost$ago" + if (teardownFailed) " · teardown failed" else ""
+        return "$stopped$green passed · $yellow pending review · ${failedCount(red, blocked)} · $cost$ago" + (if (teardownFailed) " · teardown failed" else "") +
+            if (earlierRows > 0) " · this run; $earlierRows more in the report from earlier runs" else ""
     }
 }
 
@@ -319,7 +322,14 @@ object SaffronProjectScan {
         if (!Files.exists(report)) return null
         return runCatching {
             val root = JsonParser.parseString(Files.readString(report)).asJsonObject
-            val t = root.getAsJsonObject("totals")
+            // A run of named scenarios folded into the earlier report: this run's own totals and rows, as the runner's
+            // report headlines it (kpiStrip, src/report/html.ts).
+            val scenarios = root.getAsJsonArray("scenarios")?.filter { it.isJsonObject }?.map { it.asJsonObject }.orEmpty()
+            val invocation = root.get("invocation")?.takeIf { it.isJsonObject }?.asJsonObject?.get("totals")?.takeIf { it.isJsonObject }?.asJsonObject
+            val fresh = scenarios.filterNot { keptFromEarlier(root, it) }
+            val earlier = if (invocation != null) scenarios.size - fresh.size else 0
+            val t = if (earlier > 0) invocation!! else root.getAsJsonObject("totals")
+            val rows = if (earlier > 0) fresh else scenarios
             LastRun(
                 green = t.get("green").asInt,
                 yellow = t.get("yellow").asInt,
@@ -330,7 +340,8 @@ object SaffronProjectScan {
                 interrupted = root.get("interrupted")?.asBoolean == true,
                 notRun = root.get("notRun")?.takeIf { it.isJsonPrimitive }?.asInt,
                 teardownFailed = teardownFailed(root),
-                blocked = root.getAsJsonArray("scenarios")?.count { s -> s.isJsonObject && s.asJsonObject.let { it.get("status")?.asString == "red" && it.get("blocked")?.isJsonPrimitive == true } } ?: 0,
+                blocked = rows.count { it.get("status")?.asString == "red" && it.get("blocked")?.isJsonPrimitive == true },
+                earlierRows = earlier,
             )
         }.getOrNull()
     }

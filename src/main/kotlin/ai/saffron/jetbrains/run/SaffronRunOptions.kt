@@ -13,4 +13,8 @@ class SaffronRunOptions : LocatableRunConfigurationOptions() {
     var extraArgs: String? by string("")
     /** The Saffron project to run in; blank means the IDE project directory. */
     var workingDirectory: String? by string("")
+    /** For a `file:LINE` scenario target: the scenario's name (null for a blank one), so the line is found again at launch. */
+    var scenario: String? by string()
+    /** Its place among the file's scenarios of that name; -1 for any other target. */
+    var scenarioIndex: Int by property(-1)
 }

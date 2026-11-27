@@ -2050,4 +2050,88 @@ class SaffronPluginTest : BasePlatformTestCase() {
             root.toFile().deleteRecursively()
         }
     }
+
+    // Review: a run of named scenarios folds the earlier report's other rows into its own (the runner's foldIntoRun).
+    // Last Run listed those rows as this run's, marking them only when they had database lines, and the Files tab's line
+    // counted every row. The runner's report marks them by ranAt and headlines this run alone (invocation.totals).
+    fun `test rows kept from an earlier run are marked as such, and the last run line counts this run alone`() {
+        val root = Files.createTempDirectory("saffron-folded").toRealPath()
+        try {
+            Files.createDirectories(root.resolve(".saffron/reports"))
+            Files.writeString(root.resolve(".saffron/reports/latest.json"), """{"startedAt":"2026-11-20T10:00:00.000Z",
+                "totals":{"green":2,"yellow":0,"red":1,"costUsd":0,"aiCalls":0},
+                "invocation":{"scenarios":1,"totals":{"green":1,"yellow":0,"red":0,"costUsd":0,"aiCalls":0}},
+                "scenarios":[{"feature":"f.saffron","scenario":"New","status":"green","ranAt":"2026-11-20T10:00:01.000Z"},
+                {"feature":"f.saffron","scenario":"Older","status":"green","ranAt":"2026-11-19T08:00:00.000Z"},
+                {"feature":"f.saffron","scenario":"Old","status":"red","blocked":"recorder","ranAt":"2026-11-19T08:30:00.000Z","steps":[]}]}""")
+            val old = Gson().fromJson("""{"feature":"f.saffron","scenario":"Old","status":"red"}""", StatusAttention::class.java)
+            val lines = ai.saffron.jetbrains.ui.reportLines(root, "2026-11-20T10:00:00.000Z", listOf(old))!!
+            assertEquals(listOf("From the run of 2026-11-19 08:30 UTC: kept from an earlier run, this run did not run this scenario."), lines.linesFor(old))
+            assertEquals("Last run: 1 passed · 0 pending review · 0 failed · $0.00 · this run; 2 more in the report from earlier runs",
+                SaffronProjectScan.scan(root.toString()).lastRun?.summary(""))
+        } finally {
+            root.toFile().deleteRecursively()
+        }
+    }
+
+    fun `test Last Run marks a row from an earlier run and headlines this run's own counts`() {
+        if (SystemInfo.isWindows) return
+        val base = Path.of(project.basePath!!)
+        val started = "2026-11-20T10:00:00.000Z"
+        val attention = """[{"feature":"f.saffron","scenario":"New","status":"red"},{"feature":"f.saffron","scenario":"Old","status":"red"}]"""
+        try {
+            Files.createDirectories(base.resolve(".saffron/reports"))
+            Files.writeString(base.resolve(".saffron/reports/latest.json"), """{"startedAt":"$started","totals":{"green":1,"yellow":0,"red":2},
+                "invocation":{"scenarios":2,"totals":{"green":1,"yellow":0,"red":1}},
+                "scenarios":[{"feature":"f.saffron","scenario":"New","status":"red","ranAt":"2026-11-20T10:00:01.000Z"},
+                {"feature":"f.saffron","scenario":"Old","status":"red","ranAt":"2026-11-19T08:30:00.000Z"},
+                {"feature":"f.saffron","scenario":"Green","status":"green","ranAt":"2026-11-20T10:00:02.000Z"}]}""")
+            // saffron-ai with lastRun.counts and combined: its words.
+            standInCases(base, """  *) echo '{"packageInstalled":true,"lastRun":{"startedAt":"$started","totals":{"scenarios":3,"green":1,"red":2},"counts":"1 passed, 0 pending review, 1 failed","combined":{"earlierRows":1,"counts":"1 passed, 0 pending review, 2 failed"},"attention":$attention}}' ;;""")
+            val tab = LastRunTab(project, testRootDisposable)
+            val tree = UIUtil.findComponentOfType(tab, Tree::class.java)!!
+            val top = tree.model.root as DefaultMutableTreeNode
+            fun shown(node: Any): String {
+                val c = tree.cellRenderer.getTreeCellRendererComponent(tree, node, false, false, true, 0, false)
+                return (c as com.intellij.ui.SimpleColoredComponent).getCharSequence(false).toString()
+            }
+            fun rows() = top.depthFirstEnumeration().toList().filter { it !== top }.reversed().map { shown(it) }
+            PlatformTestUtil.waitWithEventsDispatching("the row from an earlier run was never marked: ${rows()} ${tree.emptyText.text}", { rows().any { it.startsWith("Old") && it.contains("from an earlier run") } }, 60)
+            assertTrue(rows().toString(), rows().any { it.startsWith("This run: 1 passed, 0 pending review, 1 failed") && it.contains("1 more in the report from earlier runs") })
+            assertTrue(rows().toString(), rows().none { it.startsWith("New") && it.contains("earlier") })
+            // An older runner's status, without counts: the report's own counts and ranAt.
+            standInCases(base, """  *) echo '{"packageInstalled":true,"lastRun":{"startedAt":"$started","totals":{"scenarios":3,"green":1,"red":2},"attention":[{"feature":"f.saffron","scenario":"Old","status":"red"}]}}' ;;""")
+            SaffronStatusService.getInstance(project).refresh()
+            PlatformTestUtil.waitWithEventsDispatching("an older runner's run had no headline of its own: ${rows()}", {
+                rows().none { it.startsWith("New") } &&
+                rows().any { it.startsWith("This run: 1 passed, 0 pending review, 1 failed") && it.contains("1 more in the report from earlier runs") } &&
+                    rows().any { it.startsWith("Old") && it.contains("from an earlier run") }
+            }, 60)
+            // All green, with earlier rows in the report: the empty tree says this run's counts.
+            val green = Gson().fromJson("""{"lastRun":{"startedAt":"s","totals":{"scenarios":3,"green":3},"counts":"1 passed, 0 pending review, 0 failed","combined":{"earlierRows":2,"counts":"3 passed, 0 pending review, 0 failed"},"attention":[]}}""", ProjectStatus::class.java)
+            assertEquals("Everything passed: 1 passed, 0 pending review, 0 failed in this run, 2 more in the report from earlier runs", ai.saffron.jetbrains.ui.lastRunEmptyText(green))
+        } finally {
+            base.resolve("node_modules").toFile().deleteRecursively()
+            base.resolve(".saffron").toFile().deleteRecursively()
+        }
+    }
+
+    // saffron-ai lists a StepSet recording whose StepSet is gone as an orphan of kind "step-set": the Orphans tab counted
+    // it for Remove All and listed nothing, saying every recording belongs to a scenario. A kind it does not know is listed too.
+    fun `test Orphans lists StepSet recordings and kinds it does not know`() {
+        if (SystemInfo.isWindows) return
+        val base = Path.of(project.basePath!!)
+        try {
+            val stepSet = """{"file":".saffron/step-sets/log-in.json","kind":"step-set","scenario":"StepSet: Log in","reason":"scenario-gone"}"""
+            val other = """{"file":".saffron/widgets/w.json","kind":"widget","reason":"unknown"}"""
+            standInCases(base, """  status) echo '{"packageInstalled":true,"features":[],"orphans":[$stepSet,$other],"orphanScan":{"complete":true,"errors":[]}}' ;;""")
+            val tab = OrphansTab(project, testRootDisposable)
+            val tree = UIUtil.findComponentOfType(tab, Tree::class.java)!!
+            val root = tree.model.root as javax.swing.tree.DefaultMutableTreeNode
+            fun labels() = root.children().toList().map { it.toString() }
+            PlatformTestUtil.waitWithEventsDispatching("the StepSet recording was not listed: ${labels()}", { labels() == listOf("StepSet recordings", "Other recordings") }, 60)
+            assertEquals("Log in", root.getChildAt(0).getChildAt(0).toString())
+            assertEquals("w.json", root.getChildAt(1).getChildAt(0).toString())
+        } finally { Files.deleteIfExists(base.resolve("node_modules/.bin/saffron")) }
+    }
 }

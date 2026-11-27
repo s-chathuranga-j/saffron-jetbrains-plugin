@@ -49,12 +49,15 @@ class SaffronRunScenarioAction : LSPCommandAction(), DumbAware {
                 .notify(project)
             return
         }
+        // The runner reads the file from disk, and so does finding a by-line scenario's place below.
+        FileDocumentManager.getInstance().saveAllDocuments()
         // The folder and the runner's version are read from disk, which on a WSL path or a
         // network share is slow enough to freeze the IDE: off the UI thread, then back to it.
         ApplicationManager.getApplication().executeOnPooledThread {
             if (!File(argument.root).isDirectory) return@executeOnPooledThread
             // The language server can be another project's saffron-ai than the one this runs.
             val runs = SaffronScenarioRun.runnerRunsScenarios(argument.root)
+            val index = SaffronScenarioRun.indexOnDisk(argument.root, argument.target, argument.scenario)
             ApplicationManager.getApplication().invokeLater({
                 if (!runs) {
                     NotificationGroupManager.getInstance().getNotificationGroup("Saffron")
@@ -66,9 +69,7 @@ class SaffronRunScenarioAction : LSPCommandAction(), DumbAware {
                         .notify(project)
                     return@invokeLater
                 }
-                // The runner reads the file from disk.
-                FileDocumentManager.getInstance().saveAllDocuments()
-                val settings = SaffronScenarioRun.configuration(project, argument.root, argument.target, argument.scenario, argument.mode)
+                val settings = SaffronScenarioRun.configuration(project, argument.root, argument.target, argument.scenario, argument.mode, index)
                 ProgramRunnerUtil.executeConfiguration(settings, DefaultRunExecutor.getRunExecutorInstance())
             }, project.disposed)
         }

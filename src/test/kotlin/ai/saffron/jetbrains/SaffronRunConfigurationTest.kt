@@ -275,6 +275,181 @@ class SaffronRunConfigurationTest : BasePlatformTestCase() {
         }
     }
 
+    fun `test right-click Run on a by-line scenario is not another scenario's configuration that had its line`() {
+        val base = Path.of(project.basePath!!)
+        val runManager = RunManager.getInstance(project)
+        val file = base.resolve("features/years.saffron")
+        try {
+            Files.createDirectories(base.resolve("features"))
+            Files.writeString(base.resolve("saffron.config.json"), "{}")
+            Files.writeString(file, "Feature: Y\n\nScenario: 2024\n  Given a\n\nScenario: 2025\n  Given b\n")
+            val vf = LocalFileSystem.getInstance().refreshAndFindFileByNioFile(file)!!
+            IndexingTestUtil.waitUntilIndexesAreReady(project)
+            val settings = contextAt(vf, 3).configuration!!
+            runManager.addConfiguration(settings)
+            // The blocks swapped: right-click on 2025, now on line 3, is not the 2024 configuration, and that one runs 2024.
+            Files.writeString(file, "Feature: Y\n\nScenario: 2025\n  Given b\n\nScenario: 2024\n  Given a\n")
+            com.intellij.openapi.vfs.VfsUtil.markDirtyAndRefresh(false, false, false, vf)
+            com.intellij.openapi.fileEditor.FileDocumentManager.getInstance().reloadFiles(vf)
+            val found = contextAt(vf, 3).findExisting()
+            assertTrue(found?.name, found == null || found.name == "Run '2025'")
+            assertEquals("features/years.saffron:6", SaffronCommand.forConfiguration(settings.configuration as SaffronRunConfiguration).parametersList.list.last())
+        } finally {
+            runManager.getConfigurationSettingsList(SaffronConfigurationType.INSTANCE).forEach(runManager::removeConfiguration)
+            Files.deleteIfExists(base.resolve("saffron.config.json"))
+            base.resolve("features").toFile().deleteRecursively()
+        }
+    }
+
+    fun `test a by-line target whose scenario is gone refuses to run, and the stored scenario is cleared where paths are set anew`() {
+        val base = Path.of(project.basePath!!)
+        val file = base.resolve("features/twice.saffron")
+        try {
+            Files.createDirectories(base.resolve("features"))
+            Files.writeString(file, "Feature: T\n\nScenario: Same\n  Given a\n\nScenario: Same\n  Given b\n")
+            val root = FileUtil.toSystemIndependentName(base.toString())
+            // A name ending in a time is a name: nothing stored to move it to a line.
+            assertEquals(-1, (SaffronScenarioRun.configuration(project, root, "features/twice.saffron:Checkout at 10:30", "Checkout at 10:30", "run").configuration as SaffronRunConfiguration).scenarioIndex)
+            // The lens's second "Same": its place among that name's, from the file on disk.
+            assertEquals(1, SaffronScenarioRun.indexOnDisk(root, "features/twice.saffron:6", "Same"))
+            val lens = SaffronScenarioRun.configuration(project, root, "features/twice.saffron:6", "Same", "run", 1)
+            val c = lens.configuration as SaffronRunConfiguration
+            Files.writeString(file, "Feature: T\n\nScenario: Same\n  Given a\n")
+            assertThrows(com.intellij.execution.ExecutionException::class.java, "Scenario 'Same' is no longer in features/twice.saffron", ThrowableRunnable<Throwable> { SaffronCommand.forConfiguration(c) })
+            // A by-name run reuses the slot: nothing of the by-line one carries in.
+            SaffronRunner.prepare(project, lens.name) { it.paths = "features/twice.saffron" }
+            assertEquals(-1, c.scenarioIndex)
+            assertEquals(listOf("run", "--", "features/twice.saffron"), SaffronCommand.forConfiguration(c).parametersList.list.takeLast(3))
+            // Paths typed by hand run as typed.
+            c.scenario = "Same"; c.scenarioIndex = 0; c.paths = "features/twice.saffron:3"
+            val editor = SaffronSettingsEditor()
+            Disposer.register(testRootDisposable, editor)
+            editor.resetFrom(c)
+            editor.applyTo(c)
+            assertEquals(0, c.scenarioIndex)
+            UIUtil.findComponentsOfType(editor.component, com.intellij.ui.components.JBTextField::class.java).first { it.text == "features/twice.saffron:3" }.text = "features/twice.saffron:4"
+            editor.applyTo(c)
+            assertEquals(-1, c.scenarioIndex)
+            assertEquals("features/twice.saffron:4", SaffronCommand.forConfiguration(c).parametersList.list.last())
+        } finally {
+            RunManager.getInstance(project).let { m -> m.getConfigurationSettingsList(SaffronConfigurationType.INSTANCE).forEach(m::removeConfiguration) }
+            base.resolve("features").toFile().deleteRecursively()
+        }
+    }
+
+    fun `test right-click Run on a scenario with no name finds its configuration again and follows its line`() {
+        val base = Path.of(project.basePath!!)
+        val runManager = RunManager.getInstance(project)
+        val file = base.resolve("features/unnamed.saffron")
+        try {
+            Files.createDirectories(base.resolve("features"))
+            Files.writeString(base.resolve("saffron.config.json"), "{}")
+            Files.writeString(file, "Feature: U\n\nScenario:\n  Given a\n")
+            val vf = LocalFileSystem.getInstance().refreshAndFindFileByNioFile(file)!!
+            IndexingTestUtil.waitUntilIndexesAreReady(project)
+            val settings = contextAt(vf, 3).configuration!!
+            runManager.addConfiguration(settings)
+            assertSame(settings, contextAt(vf, 3).findExisting())
+            Files.writeString(file, "Feature: U\n\n# a note\nScenario:\n  Given a\n")
+            assertEquals("features/unnamed.saffron:4", SaffronCommand.forConfiguration(settings.configuration as SaffronRunConfiguration).parametersList.list.last())
+        } finally {
+            runManager.getConfigurationSettingsList(SaffronConfigurationType.INSTANCE).forEach(runManager::removeConfiguration)
+            Files.deleteIfExists(base.resolve("saffron.config.json"))
+            base.resolve("features").toFile().deleteRecursively()
+        }
+    }
+
+    /** The configurations right-click Run offers in [file]'s editor at a 0-based [line], or on the file itself (no editor) when [line] is null. */
+    private fun contextAt(file: com.intellij.openapi.vfs.VirtualFile, line: Int?): ConfigurationContext {
+        val builder = SimpleDataContext.builder().add(CommonDataKeys.PROJECT, project)
+        if (line != null) {
+            myFixture.configureFromExistingVirtualFile(file)
+            myFixture.editor.caretModel.moveToLogicalPosition(com.intellij.openapi.editor.LogicalPosition(line, 0))
+            builder.add(CommonDataKeys.EDITOR, myFixture.editor).add(Location.DATA_KEY, PsiLocation(myFixture.file))
+        } else {
+            builder.add(Location.DATA_KEY, PsiLocation(PsiManager.getInstance(project).findFile(file)!!))
+        }
+        return ConfigurationContext.getFromContext(builder.build(), ActionPlaces.UNKNOWN)
+    }
+
+    // Review: right-click Run is a plain run, but a saved configuration with extra arguments was found for it, and the
+    // template's switches carried into a new one (saffron run --rerecord --workers 4).
+    fun `test right-click Run never reuses a configuration with extra arguments`() {
+        val base = Path.of(project.basePath!!)
+        val runManager = RunManager.getInstance(project)
+        val type = SaffronConfigurationType.INSTANCE
+        try {
+            Files.createDirectories(base.resolve("features"))
+            Files.writeString(base.resolve("saffron.config.json"), "{}")
+            Files.writeString(base.resolve("features/login.saffron"), "Feature: Login\n\nScenario: Works\n    Given x\n")
+            val vf = LocalFileSystem.getInstance().refreshAndFindFileByNioFile(base.resolve("features/login.saffron"))!!
+            IndexingTestUtil.waitUntilIndexesAreReady(project)
+            val nightly = runManager.createConfiguration("Nightly re-record", type.factory)
+            (nightly.configuration as SaffronRunConfiguration).apply {
+                command = "run"; workingDirectory = FileUtil.toSystemIndependentName(base.toString()); paths = "features/login.saffron"; extraArgs = "--rerecord --headed"
+            }
+            runManager.addConfiguration(nightly)
+            assertNotSame(nightly, contextAt(vf, null).findExisting())
+        } finally {
+            runManager.getConfigurationSettingsList(type).forEach(runManager::removeConfiguration)
+            Files.deleteIfExists(base.resolve("saffron.config.json"))
+            base.resolve("features").toFile().deleteRecursively()
+        }
+    }
+
+    fun `test right-click Run takes none of the template's switches`() {
+        val base = Path.of(project.basePath!!)
+        val runManager = RunManager.getInstance(project)
+        val type = SaffronConfigurationType.INSTANCE
+        val template = runManager.getConfigurationTemplate(type.factory).configuration as SaffronRunConfiguration
+        try {
+            Files.createDirectories(base.resolve("features"))
+            Files.writeString(base.resolve("saffron.config.json"), "{}")
+            Files.writeString(base.resolve("features/login.saffron"), "Feature: Login\n\nScenario: Works\n    Given x\n")
+            val vf = LocalFileSystem.getInstance().refreshAndFindFileByNioFile(base.resolve("features/login.saffron"))!!
+            IndexingTestUtil.waitUntilIndexesAreReady(project)
+            template.rerecord = true; template.headed = true; template.replayOnly = true; template.tags = "@smoke"; template.extraArgs = "--workers 4"
+            val offered = (contextAt(vf, null).configurationsFromContext ?: emptyList()).mapNotNull { it.configuration as? SaffronRunConfiguration }.single()
+            assertEquals(listOf("run", "--", "features/login.saffron"), SaffronCommand.arguments(offered))
+        } finally {
+            template.rerecord = false; template.headed = false; template.replayOnly = false; template.tags = ""; template.extraArgs = ""
+            runManager.getConfigurationSettingsList(type).forEach(runManager::removeConfiguration)
+            Files.deleteIfExists(base.resolve("saffron.config.json"))
+            base.resolve("features").toFile().deleteRecursively()
+        }
+    }
+
+    // Review: a scenario the runner selects by line (a name it reads as lines, or one the file has twice) was stored as
+    // file:LINE, so after lines were added above it Rerun ran whichever block owned that line, under the old name.
+    fun `test a by-line scenario target follows its scenario when lines move`() {
+        val base = Path.of(project.basePath!!)
+        val runManager = RunManager.getInstance(project)
+        val file = base.resolve("features/years.saffron")
+        try {
+            Files.createDirectories(base.resolve("features"))
+            Files.writeString(base.resolve("saffron.config.json"), "{}")
+            Files.writeString(file, "Feature: Y\n\nScenario: 2024\n  Given a\n\nScenario: 2025\n  Given b\n")
+            val vf = LocalFileSystem.getInstance().refreshAndFindFileByNioFile(file)!!
+            IndexingTestUtil.waitUntilIndexesAreReady(project)
+            val settings = contextAt(vf, 3).configuration!!
+            runManager.addConfiguration(settings)
+            val c = settings.configuration as SaffronRunConfiguration
+            assertEquals("Run '2024'", c.name)
+            assertEquals("features/years.saffron:3", c.paths)
+            // Two lines added above it: the run targets the scenario where it is now.
+            Files.writeString(file, "Feature: Y\n\n# a note\n# another\nScenario: 2024\n  Given a\n\nScenario: 2025\n  Given b\n")
+            assertEquals("features/years.saffron:5", SaffronCommand.forConfiguration(c).parametersList.list.last())
+            // The same for a Run lens's configuration of a by-line target.
+            val lens = SaffronScenarioRun.configuration(project, FileUtil.toSystemIndependentName(base.toString()), "features/years.saffron:5", "2024", "run")
+            Files.writeString(file, "Feature: Y\n\n# a note\n# another\n\nScenario: 2024\n  Given a\n\nScenario: 2025\n  Given b\n")
+            assertEquals("features/years.saffron:6", SaffronCommand.forConfiguration(lens.configuration as SaffronRunConfiguration).parametersList.list.last())
+        } finally {
+            runManager.getConfigurationSettingsList(SaffronConfigurationType.INSTANCE).forEach(runManager::removeConfiguration)
+            Files.deleteIfExists(base.resolve("saffron.config.json"))
+            base.resolve("features").toFile().deleteRecursively()
+        }
+    }
+
     fun `test the runner is found in a folder above the project, and npx is pinned to the declared range`() {
         val top = Files.createTempDirectory("saffron-up").toRealPath()
         try {

@@ -32,7 +32,7 @@ import javax.swing.tree.TreePath
 internal class Screenshot(val file: VirtualFile? = null, val problem: String? = null)
 
 /** What the tab says when it lists no scenario. An interrupted run never reads as everything passed. */
-internal fun lastRunEmptyText(status: ProjectStatus?, teardownFailed: Boolean = false): String {
+internal fun lastRunEmptyText(status: ProjectStatus?, teardownFailed: Boolean = false, thisRun: ThisRun? = status?.lastRun?.let(::thisRun)): String {
     val run = status?.lastRun
     return when {
         status == null -> "Loading…"
@@ -42,9 +42,17 @@ internal fun lastRunEmptyText(status: ProjectStatus?, teardownFailed: Boolean = 
         run.interrupted -> "Run interrupted: ${run.notRun ?: "some"} scenario(s) did not run, and count as neither passed nor failed"
         // The runner exits 2 for it (VS Code's words).
         teardownFailed -> "Teardown failed: the scenarios passed; check for processes or containers left running"
+        // A run of named scenarios folded into the earlier report: its own counts, the kept rows apart.
+        thisRun != null -> "Everything passed: ${thisRun.counts} in this run, ${thisRun.earlierRows} more in the report from earlier runs"
         else -> "Everything passed: ${run.totals.green} green in the last run"
     }
 }
+
+/** A run of named scenarios folded into the earlier report (the runner's foldIntoRun): its own [counts], and how many rows came from earlier runs. */
+internal class ThisRun(val counts: String, val earlierRows: Int)
+
+/** From saffron-ai's `lastRun.counts` and `combined`; null from a runner without them (the report says it then) or with no earlier rows. */
+internal fun thisRun(run: StatusLastRun): ThisRun? = run.combined?.takeIf { it.earlierRows > 0 && run.counts != null }?.let { ThisRun(run.counts!!, it.earlierRows) }
 
 /** A browser matrix lists a scenario once per browser: the label says which. */
 internal fun attentionLabel(a: StatusAttention, matrix: Boolean): String =
@@ -142,7 +150,7 @@ private fun instant(e: JsonElement?): java.time.Instant? = text(e)?.let { runCat
  * A scenario a run of named scenarios kept from the last report (the runner's foldIntoRun): run before this run
  * started, as the runner's report tells it apart ("from the run of ..."). Its rows are not this run's.
  */
-private fun keptFromEarlier(report: JsonObject, s: JsonObject): Boolean {
+internal fun keptFromEarlier(report: JsonObject, s: JsonObject): Boolean {
     val ran = instant(s.get("ranAt")) ?: return false
     val started = instant(report.get("startedAt")) ?: return false
     return ran.isBefore(started)
@@ -174,7 +182,8 @@ private fun scenarioLines(report: JsonObject, scenario: JsonObject): List<String
         }
     }
     val lines = checks + cleanupLines(texts(scenario.get("dbCleanup")))
-    if (lines.isEmpty() || !keptFromEarlier(report, scenario)) return lines
+    // Said whether or not it has database lines: the row itself is not this run's.
+    if (!keptFromEarlier(report, scenario)) return lines
     val ran = instant(scenario.get("ranAt"))!!.toString().replace("T", " ").take(16)
     return listOf("From the run of $ran UTC: kept from an earlier run, this run did not run this scenario.") + lines
 }
@@ -207,9 +216,28 @@ private fun cleanupSummary(report: JsonObject, byKey: Map<String, JsonObject>, l
     })
 }
 
-/** What Last Run takes from the run's report, worked out off the UI thread: each listed row's lines by key, the cleanup row, the teardown. */
-internal class ReportLines(val byRow: Map<String, List<String>>, val cleanup: Pair<Int, List<String>>?, val teardownFailed: Boolean) {
+/**
+ * What Last Run takes from the run's report, worked out off the UI thread: each listed row's lines by key, the listed
+ * rows kept from an earlier run, the cleanup row, the teardown, and this run's own counts when the report holds earlier rows.
+ */
+internal class ReportLines(
+    val byRow: Map<String, List<String>>,
+    val cleanup: Pair<Int, List<String>>?,
+    val teardownFailed: Boolean,
+    private val kept: Set<String> = emptySet(),
+    val thisRun: ThisRun? = null,
+) {
     fun linesFor(a: StatusAttention): List<String> = byRow[keyOf(a)].orEmpty()
+    fun keptFromEarlier(a: StatusAttention): Boolean = keyOf(a) in kept
+}
+
+/** The runner's report's own counts (kpiStrip, src/report/html.ts): `invocation.totals` when it holds rows kept from earlier runs. */
+internal fun thisRunOf(report: JsonObject): ThisRun? {
+    val totals = report.get("invocation")?.takeIf { it.isJsonObject }?.asJsonObject?.get("totals")?.takeIf { it.isJsonObject }?.asJsonObject ?: return null
+    val earlier = objects(report.get("scenarios")).count { keptFromEarlier(report, it) }
+    if (earlier == 0) return null
+    fun n(key: String) = totals.get(key)?.takeIf { it.isJsonPrimitive && it.asJsonPrimitive.isNumber }?.asInt ?: 0
+    return ThisRun("${n("green")} passed, ${n("yellow")} pending review, ${n("red")} failed", earlier)
 }
 
 /** The run's report read and worked out for [attention], once: null when the report is not that run's. Reads the disk. */
@@ -218,12 +246,13 @@ internal fun reportLines(base: java.nio.file.Path, startedAt: String, attention:
     val byKey = scenariosByKey(report)
     val listed = attention.mapTo(HashSet(), ::keyOf)
     val byRow = listed.mapNotNull { key -> byKey[key]?.let { s -> scenarioLines(report, s).takeIf { it.isNotEmpty() }?.let { key to it } } }.toMap()
-    return ReportLines(byRow, cleanupSummary(report, byKey, listed), teardownFailed(report))
+    val kept = listed.filterTo(HashSet()) { key -> byKey[key]?.let { keptFromEarlier(report, it) } == true }
+    return ReportLines(byRow, cleanupSummary(report, byKey, listed), teardownFailed(report), kept, thisRunOf(report))
 }
 
 private class RunRow(
     val label: String,
-    val detail: String = "",
+    var detail: String = "",
     val icon: Icon? = null,
     var tooltip: String? = null,
     val attention: StatusAttention? = null,
@@ -332,6 +361,9 @@ class LastRunTab(project: Project, parent: Disposable) : StatusTab(project, pare
             }
             root.add(parent)
         }
+        // A run of named scenarios folded into the earlier report: its own counts head the rows, which may be earlier runs'.
+        val folded = run?.let(::thisRun)
+        if (folded != null && !attention.isNullOrEmpty()) root.insert(headline(folded), 0)
         model.reload()
         TreeUtil.expandAll(tree)
         // The rows each database check found are in the run's report, not in status: added to the tooltips once read.
@@ -342,12 +374,20 @@ class LastRunTab(project: Project, parent: Disposable) : StatusTab(project, pare
             val base = projectRoot
             offUiThread(project, alive, { reportLines(base, started, attention) }) { report ->
                 if (report == null || rendered !== status) return@offUiThread
-                if (attention.isEmpty() && !run.interrupted && report.teardownFailed) tree.emptyText.text = lastRunEmptyText(status, teardownFailed = true)
+                // An older runner's status has no counts of this run's own: the report's.
+                val own = folded ?: report.thisRun
+                if (attention.isEmpty() && !run.interrupted) tree.emptyText.text = lastRunEmptyText(status, report.teardownFailed, own)
+                if (folded == null && report.thisRun != null && attention.isNotEmpty()) model.insertNodeInto(headline(report.thisRun), root, 0)
                 if (report.byRow.isNotEmpty()) {
                     for (node in root.depthFirstEnumeration().toList()) {
                         val r = (node as? DefaultMutableTreeNode)?.userObject as? RunRow ?: continue
                         val a = r.attention ?: continue
                         report.linesFor(a).takeIf { it.isNotEmpty() }?.let { r.tooltip = attentionTooltip(a, screenshotOf(a.evidence) != null, it) }
+                        // The runner's report marks it "from the run of ..." too: this run did not run it.
+                        if (report.keptFromEarlier(a)) {
+                            r.detail = listOf(r.detail, "from an earlier run").filter { it.isNotEmpty() }.joinToString(" · ")
+                            model.nodeChanged(node)
+                        }
                     }
                 }
                 report.cleanup?.let { (count, lines) ->
@@ -361,6 +401,11 @@ class LastRunTab(project: Project, parent: Disposable) : StatusTab(project, pare
         }
         was?.let { w -> TreeUtil.findNode(root) { (it.userObject as? RunRow)?.attention?.let(::attentionTraceSelector) == w } }?.let { tree.selectionPath = TreePath(it.path) }
     }
+
+    private fun headline(own: ThisRun) = DefaultMutableTreeNode(
+        RunRow("This run: ${own.counts}", "${own.earlierRows} more in the report from earlier runs", AllIcons.General.Information,
+            "A run of named scenarios keeps the earlier report's other rows; those marked \"from an earlier run\" are not this run's."),
+    )
 
     private fun selected(): StatusAttention? =
         ((tree.lastSelectedPathComponent as? DefaultMutableTreeNode)?.userObject as? RunRow)?.attention

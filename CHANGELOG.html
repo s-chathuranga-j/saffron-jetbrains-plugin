@@ -1,3 +1,10 @@
+<h3>Unreleased</h3>
+<ul>
+  <li>Right-click Run is a plain run again: it no longer reuses a saved configuration of the same file that has extra arguments (a "Nightly re-record" with <code>--rerecord --headed</code>), and a new one takes none of the Saffron template's switches, tags or extra arguments.</li>
+  <li>A scenario run by its line (a name the runner reads as lines, such as <code>Scenario: 2024</code>, or a name the file has twice) is found again by its name when it runs, so Rerun after an edit above it runs that scenario, not whichever block now holds the old line. If the scenario is gone, the run stops and says so. Right-click Run on another scenario that moved to that line gets its own configuration.</li>
+  <li>After a run of named scenarios, which saffron-ai folds into the earlier report, Last Run marks each row this run did not run "from an earlier run" (it was marked only when it had database rows) and heads the rows with this run's own counts. The Files tab's last run line counts this run alone, and says how many rows in the report are from earlier runs.</li>
+  <li>The Orphans tab lists a StepSet recording whose StepSet is gone, and any kind of orphan it does not know. Remove All deleted them while the tab said every recording belongs to a scenario.</li>
+</ul>
 <h3>0.8.5</h3>
 <ul>
   <li>A <code>db</code> setting in <code>saffron.config.json</code> that saffron-ai 1.4.4 refuses (one database, <code>db.databases</code>, <code>redactColumns</code>) is marked on the Files tab, in saffron-ai's words.</li>
